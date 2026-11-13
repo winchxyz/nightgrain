@@ -1318,7 +1318,7 @@ async function exportOne(kind, progress, signal) {
   }
   if (kind === 'sticker') {
     r = await exportSticker(app, progress, signal);
-    return r && { ...r, tag: '-sticker', text: r.fits ? `Saved sticker · ${r.w} × ${r.h} · ${r.seconds.toFixed(1)} s` : 'Saved, but it is over Telegram’s 256 KB limit. Try fewer colours, less shimmer or a shorter loop' };
+    return r && { ...r, tag: '-sticker', text: r.fits ? `Saved sticker · ${r.w} × ${r.h} · ${r.seconds.toFixed(1)} s` + (r.slowed ? ` · ${r.fps} frames a second to fit 256 KB` : '') : 'Saved, but it is over Telegram’s 256 KB limit. Try fewer colours, less shimmer or a shorter loop' };
   }
   if (kind === 'svg') {
     r = await exportSVG(app);
@@ -1348,11 +1348,24 @@ function exportEnd() {
   dirty = true;
 }
 
+/** True when the frame on screen has nothing but the backdrop (a break-up at its start, say). */
+function emptyFrame() {
+  const a = engine.idx;
+  if (!a) return false;
+  for (let i = 0, n = engine.w * engine.h; i < n; i++) if (a[i]) return false;
+  return true;
+}
+
 async function runExport(kind) {
   if (busy || recording || !src) return;
   const animated = ANIMATED.has(kind);
   if (animated && src.kind === 'camera') {
     toast('The camera is live. Record a clip first (Source), then save it.', 4600);
+    return;
+  }
+  if (!animated && emptyFrame()) {
+    toast('This frame is empty. Move the playhead to a moment with something in it, then save.', 5000);
+    app.lastExport = { empty: true };
     return;
   }
   const tKeep = t;

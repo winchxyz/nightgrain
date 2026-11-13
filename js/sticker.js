@@ -108,8 +108,12 @@ export async function encodeSticker(app, onProgress, signal) {
   const alp = document.createElement('canvas');
   col.width = alp.width = W;
   col.height = alp.height = H;
+  const low = document.createElement('canvas');
+  low.width = Math.max(2, Math.round(W / 16));
+  low.height = Math.max(2, Math.round(H / 16));
   const cx = col.getContext('2d');
   const ax = alp.getContext('2d', { willReadFrequently: true });
+  const lx = low.getContext('2d');
   const plane = new Uint8Array(W * H + 2 * (W / 2) * (H / 2)).fill(128);
 
   const attempt = async (bits, fps, label) => {
@@ -128,8 +132,8 @@ export async function encodeSticker(app, onProgress, signal) {
       e.configure({ codec: CODEC, width: W, height: H, bitrate: Math.round(bitrate), framerate: fps });
       return e;
     };
-    const ec = open(colour, bits * 0.8);
-    const ea = open(alpha, bits * 0.2);
+    const ec = open(colour, bits * 0.4);
+    const ea = open(alpha, bits * 0.6);
     try {
       for (let i = 0; i < frames; i++) {
         if (signal.cancelled) return null;
@@ -138,10 +142,18 @@ export async function encodeSticker(app, onProgress, signal) {
         const Pe = app.live();
         engine.compose(art, k, Pe, { transparent: true });
         const smoothIt = art.width !== W || art.height !== H;
-        cx.imageSmoothingEnabled = ax.imageSmoothingEnabled = smoothIt;
-        cx.imageSmoothingQuality = ax.imageSmoothingQuality = 'high';
-        cx.fillStyle = livePalette(Pe)[0];
+        cx.imageSmoothingQuality = ax.imageSmoothingQuality = lx.imageSmoothingQuality = 'high';
+        // What lies under a see-through pixel is never shown, so it takes the colour of the
+        // lit pixels around it: edges keep their colour, and the colour stream turns into
+        // soft patches that cost almost nothing. The fine detail lives in the alpha stream.
+        const pal = livePalette(Pe);
+        lx.clearRect(0, 0, low.width, low.height);
+        lx.drawImage(art, 0, 0, low.width, low.height);
+        cx.imageSmoothingEnabled = true;
+        cx.fillStyle = pal[1] || pal[0];
         cx.fillRect(0, 0, W, H);
+        for (let r = 0; r < 4; r++) cx.drawImage(low, 0, 0, W, H);
+        cx.imageSmoothingEnabled = ax.imageSmoothingEnabled = smoothIt;
         cx.drawImage(art, 0, 0, W, H);
         ax.clearRect(0, 0, W, H);
         ax.drawImage(art, 0, 0, W, H);
@@ -167,16 +179,27 @@ export async function encodeSticker(app, onProgress, signal) {
   };
 
   // Aim under the limit. Grain is hard to compress, so measure how far off the file is and
-  // try again with fewer bits; if that is not enough, with fewer frames per second too.
+  // try again with fewer bits. The encoder will not go below a certain size per frame, so
+  // once fewer bits stop helping, drop frames per second instead.
   let bits = (STICKER_LIMIT * 8 * 0.8) / seconds;
   let fps = fps0;
   let got = null;
-  for (let n = 0; n < 6; n++) {
+  let before = 0;
+  const tries = [];
+  for (let n = 0; n < 8; n++) {
     got = await attempt(bits, fps, n ? 'Encoding again, smaller' : 'Encoding');
     if (!got) return null;
-    if (got.bytes.length <= STICKER_LIMIT) break;
-    if (n >= 2 && fps > 12) fps = Math.round(fps / 2);
-    bits = Math.max(30e3, bits * Math.min(0.7, (STICKER_LIMIT * 0.88) / got.bytes.length));
+    const size = got.bytes.length;
+    tries.push([fps, Math.round(bits / 1000), size]);
+    if (size <= STICKER_LIMIT) break;
+    const need = (STICKER_LIMIT * 0.88) / size;
+    const stuck = before > 0 && size > before * 0.82;
+    before = size;
+    if ((stuck || n >= 2) && fps > 5) {
+      fps = Math.max(5, Math.round(fps * Math.min(0.7, need)));
+      before = 0;
+    }
+    bits = Math.max(30e3, bits * Math.min(0.7, need));
   }
-  return { blob: new Blob([got.bytes], { type: 'video/webm' }), w: W, h: H, seconds, frames: got.frames, fits: got.bytes.length <= STICKER_LIMIT, ext: 'webm' };
+  return { blob: new Blob([got.bytes], { type: 'video/webm' }), w: W, h: H, seconds, frames: got.frames, fits: got.bytes.length <= STICKER_LIMIT, fps, slowed: fps < fps0, tries, ext: 'webm' };
 }
