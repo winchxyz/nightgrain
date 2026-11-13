@@ -2,6 +2,7 @@
 
 import { clamp, smooth, hash, hexToRgb, adjustHex, hslToHex, hexOf } from './util.js';
 import { dither } from './dither.js';
+import { charsOn, charCells, glyphTile, blockTile, brailleTile, hotTile, HOT } from './chars.js';
 
 const TAU = Math.PI * 2;
 
@@ -27,6 +28,9 @@ export function shapeSet(P) {
   const set = String(P.shapeSet || '').split(',').filter((s) => SHAPE_IDS.has(s));
   return set.length ? set : [P.shape];
 }
+
+/** True when light effects add colours beyond the palette. */
+export const hasLight = (P) => P.glow > 0 || P.bloom > 0 || P.streak > 0 || P.ring > 0;
 
 /** True when pixels are drawn as anything other than plain full squares. */
 export const isShaped = (P) => P.shape !== 'square' || P.shapeMix !== 'none' || P.shapeVar > 0;
@@ -231,6 +235,35 @@ function boxBlur(src, dst, tmp, w, h, r) {
   }
 }
 
+// Box blur along rows or columns, with nothing beyond the edges. `t` is scratch space.
+function blurRows(a, t, w, h, r) {
+  const win = 2 * r + 1;
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0;
+    for (let x = 0; x < r && x < w; x++) sum += a[row + x];
+    for (let x = 0; x < w; x++) {
+      if (x + r < w) sum += a[row + x + r];
+      t[row + x] = sum / win;
+      if (x - r >= 0) sum -= a[row + x - r];
+    }
+  }
+  a.set(t);
+}
+function blurCols(a, t, w, h, r) {
+  const win = 2 * r + 1;
+  for (let x = 0; x < w; x++) {
+    let sum = 0;
+    for (let y = 0; y < r && y < h; y++) sum += a[y * w + x];
+    for (let y = 0; y < h; y++) {
+      if (y + r < h) sum += a[(y + r) * w + x];
+      t[y * w + x] = sum / win;
+      if (y - r >= 0) sum -= a[(y - r) * w + x];
+    }
+  }
+  a.set(t);
+}
+
 /**
  * Look at a picture and work out how to turn it into a low-key subject on black:
  * a gain, a black cut and a midtone curve, plus whether it sits on a plain light background.
@@ -327,6 +360,9 @@ export class Engine {
     this.idx = new Uint8Array(n);
     this.idx2 = new Uint8Array(n);
     this.lit = new Uint8Array(n);
+    // How bright every cell is (0..255), kept beside its palette colour.
+    this.lv = new Uint8Array(n);
+    this.lv2 = new Uint8Array(n);
     this.pimg = this.pctx.createImageData(w, h);
   }
 
@@ -442,12 +478,15 @@ export class Engine {
       const pos = ((phase * sweeps) % 1) * (1 + 6 * P.glintWidth) - 3 * P.glintWidth;
       const wd = Math.max(0.01, P.glintWidth);
       const k = P.glint * 3;
+      // With "dark outside" the band is the only light there is, like a torch passing over.
+      const base = 1 - (P.glintDark || 0);
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const p = ((x - w / 2) * ca + (y - h / 2) * sa) / diag + 0.5;
           const q = (p - pos) / wd;
-          if (q > -3 && q < 3) {
-            const gl = 1 + Math.exp(-q * q) * k;
+          const lit = q > -3 && q < 3;
+          if (lit || base < 1) {
+            const gl = base + (lit ? Math.exp(-q * q) * (k + 1 - base) : 0);
             const i = y * w + x;
             R[i] *= gl; G[i] *= gl; B[i] *= gl;
           }
@@ -533,9 +572,16 @@ export class Engine {
     // ---- trails: bright pixels smear along one direction and break into dust ----
     if (P.wind > 0) this.trails(P, w, h);
 
+    const lv = this.lv;
+    for (let i = 0; i < n; i++) {
+      const l = 0.299 * R[i] + 0.587 * G[i] + 0.114 * B[i];
+      lv[i] = l <= 0 ? 0 : l >= 1 ? 255 : (l * 255) | 0;
+    }
+
     // ---- dither ----
     const pal = this.palette(P);
     const tick = Math.floor(t * P.rate + 1e-6);
+    this.tick = tick;
     dither({
       R, G, B, w, h, pal: pal.f, n: pal.n, out: this.idx,
       algo: P.algo, mode: P.mode, amount: P.amount, bias: P.bias, pscale: P.pscale, serp: P.serp,
@@ -547,7 +593,31 @@ export class Engine {
     // Outside the picture (letterbox, transparent PNG) is always backdrop.
     if (P.wind <= 0) {
       const lit = pt ? this.lit : null;
-      for (let i = 0, j = 3; i < n; i++, j += 4) if (d[j] < 96 && !(lit && lit[i])) idx[i] = 0;
+      for (let i = 0, j = 3; i < n; i++, j += 4) if (d[j] < 96 && !(lit && lit[i])) { idx[i] = 0; lv[i] = 0; }
+    }
+
+    // ---- characters: every cell with some light in it holds one, not only the dithered ones ----
+    if (charsOn(P)) {
+      const floor = Math.max(1, Math.round(P.charMin * 255));
+      const f = pal.f, pn = pal.n;
+      const ramp = P.mode === 'ramp';
+      for (let i = 0; i < n; i++) {
+        const l = lv[i];
+        if (l < floor) { idx[i] = 0; continue; }
+        if (idx[i]) continue;
+        if (ramp || pn <= 2) { idx[i] = pn <= 2 ? 1 : 1 + Math.min(pn - 2, ((l / 256) * (pn - 1)) | 0); continue; }
+        // The ink nearest to the cell's own colour at full strength.
+        let r = R[i], g = G[i], b = B[i];
+        const m = Math.max(r, g, b, 1e-4);
+        r = r / m; g = g / m; b = b / m;
+        let best = 1, bd = 1e9;
+        for (let c = 1; c < pn; c++) {
+          const dr = f[c * 3] - r, dg = f[c * 3 + 1] - g, db = f[c * 3 + 2] - b;
+          const dd = dr * dr + dg * dg + db * db;
+          if (dd < bd) { bd = dd; best = c; }
+        }
+        idx[i] = best;
+      }
     }
 
     if (P.sparkle > 0) {
@@ -556,13 +626,18 @@ export class Engine {
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const i = y * w + x;
-          if (idx[i] !== 0 && hash(x, y, tick * 7 + 3) < p) idx[i] = top;
+          if (idx[i] !== 0 && hash(x, y, tick * 7 + 3) < p) { idx[i] = top; lv[i] = 255; }
         }
       }
     }
 
     // ---- break apart: lit pixels fly off and come back ----
     if (P.burst !== 'none') this.scatter(P, w, h, phase);
+
+    // How much light the frame holds; the lens ring answers to it.
+    let energy = 0;
+    for (let i = 0; i < n; i++) if (idx[i]) energy += lv[i];
+    this.energy = energy / (n * 255);
 
     // ---- paint ----
     const out = this.pimg.data;
@@ -710,6 +785,9 @@ export class Engine {
     const src = this.idx2, out = this.idx;
     src.set(out);
     out.fill(0);
+    const lv = this.lv, lsrc = this.lv2;
+    lsrc.set(lv);
+    lv.fill(0);
     const st = P.burstStagger * 1.5;
     const reach = P.burstDist * Math.max(w, h);
     const cx = w / 2, cy = h / 2;
@@ -720,7 +798,7 @@ export class Engine {
         if (!v) continue;
         const h1 = hash(x, y, 7), h2 = hash(x, y, 13), h3 = hash(x, y, 29);
         let b = away * (1 + st) - h1 * st;
-        if (b <= 0) { out[y * w + x] = v; continue; }
+        if (b <= 0) { out[y * w + x] = v; lv[y * w + x] = lsrc[y * w + x]; continue; }
         if (b > 1) b = 1;
         // Some pixels burn out on the way, so the cloud thins as it spreads.
         if (h3 < b * b * 0.9) continue;
@@ -746,7 +824,7 @@ export class Engine {
           nx = cx + Math.cos(a) * rr; ny = cy + Math.sin(a) * rr;
         }
         nx = Math.round(nx); ny = Math.round(ny);
-        if (nx >= 0 && ny >= 0 && nx < w && ny < h) out[ny * w + nx] = v;
+        if (nx >= 0 && ny >= 0 && nx < w && ny < h) { out[ny * w + nx] = v; lv[ny * w + nx] = lsrc[y * w + x]; }
       }
     }
   }
@@ -1001,6 +1079,174 @@ export class Engine {
     lx.putImageData(this.cimg, pad * k, pad * k);
   }
 
+  /** Draw every lit cell as a character whose weight and strength follow its brightness. */
+  paintChars(lx, k, pad, P) {
+    const { w, h, idx } = this;
+    const plan = charCells(this, P);
+    const cg = this.cg, ca = this.ca;
+    const pal = this.palette(P);
+    const n = pal.n;
+    const rgb = new Uint32Array(n);
+    for (let i = 1; i < n; i++) rgb[i] = (pal.u8[i * 3 + 2] << 16) | (pal.u8[i * 3 + 1] << 8) | pal.u8[i * 3];
+    const font = ':' + k + (P.charBold ? 'b' : 'r') + P.charSize.toFixed(2);
+    const mode = plan.mode;
+    const local = new Map();
+    const tileOf = (g) => {
+      let t = local.get(g);
+      if (t) return t;
+      const key = g === HOT ? 'hot:' + k : mode === 'braille' ? 'br:' + g + ':' + k : mode === 'blocks' ? 'bl:' + g + ':' + k : 'g:' + plan.list[g] + font;
+      t = this.tiles.get(key);
+      if (!t) {
+        t = g === HOT ? hotTile(k) : mode === 'braille' ? brailleTile(g, k) : mode === 'blocks' ? blockTile(g, k) : glyphTile(plan.list[g], k, P);
+        if (this.tiles.size > 900) this.tiles.clear();
+        this.tiles.set(key, t);
+      }
+      local.set(g, t);
+      return t;
+    };
+    const W = w * k, H = h * k;
+    if (!this.cimg || this.cimg.width !== W || this.cimg.height !== H) {
+      this.cimg = new ImageData(W, H);
+      this.c32 = new Uint32Array(this.cimg.data.buffer);
+    }
+    const o = this.c32;
+    o.fill(0);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = y * w + x;
+        const v = idx[i];
+        const al = ca[i];
+        if (!v || !al) continue;
+        const T = tileOf(cg[i]);
+        const col = rgb[v];
+        let row = y * k * W + x * k;
+        for (let ty = 0, q = 0; ty < k; ty++, row += W) {
+          for (let tx = 0; tx < k; tx++, q++) {
+            const a = T[q];
+            if (a) o[row + tx] = (((a * al + 128) >> 8) << 24) | col;
+          }
+        }
+      }
+    }
+    lx.putImageData(this.cimg, pad * k, pad * k);
+  }
+
+  /**
+   * Light that spills from the brightest cells: a soft bloom in three sizes and thin
+   * sideways streaks. Worked out in plain numbers at one value per cell (or coarser for
+   * the wide layers), then enlarged, so it stays smooth and cheap.
+   */
+  highlights(ctx, k, pad, P) {
+    const { w, h, idx, lv } = this;
+    const u8 = this.palette(P).u8;
+    const th = Math.round(P.hot * 255);
+    const tint = P.bloomTint > 0 ? P.bloomTint : 0;
+    const [tr, tg, tb] = hexToRgb(P.bloomColor).map((v) => v / 255);
+    const store = this.lightStore || (this.lightStore = []);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    let slot = 0;
+    // s: cells per value, rx / ry: blur reach in cells, gain: strength, lift: how much faint light is raised.
+    const layer = (s, rx, ry, gain, lift, tinted) => {
+      const qx = Math.round(rx / s), qy = Math.round(ry / s);
+      const mx = 2 * qx + 1, my = 2 * qy + 1;
+      const cw = Math.ceil(w / s) + 2 * mx, ch = Math.ceil(h / s) + 2 * my;
+      const n = cw * ch;
+      let L = store[slot];
+      if (!L || L.n !== n) L = store[slot] = { n, r: new Float32Array(n), g: new Float32Array(n), b: new Float32Array(n), t: new Float32Array(n), c: canvas(), img: null };
+      slot++;
+      const { r, g, b, t } = L;
+      r.fill(0); g.fill(0); b.fill(0);
+      const share = 1 / (255 * s * s);
+      for (let y = 0; y < h; y++) {
+        const row = (((y / s) | 0) + my) * cw + mx;
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          const v = idx[i], l = lv[i];
+          if (!v || l < th) continue;
+          // Just over the threshold counts a little, well over it counts in full.
+          const e = (0.4 + Math.min(0.6, (l - th) / 60)) * share;
+          const j = row + ((x / s) | 0);
+          r[j] += u8[v * 3] * e; g[j] += u8[v * 3 + 1] * e; b[j] += u8[v * 3 + 2] * e;
+        }
+      }
+      for (const a of [r, g, b]) {
+        for (let pass = 0; pass < 2; pass++) {
+          if (qx > 0) blurRows(a, t, cw, ch, qx);
+          if (qy > 0) blurCols(a, t, cw, ch, qy);
+        }
+      }
+      if (L.c.width !== cw || L.c.height !== ch) { L.c.width = cw; L.c.height = ch; L.img = null; }
+      const lx = L.c.getContext('2d');
+      if (!L.img) L.img = lx.createImageData(cw, ch);
+      const o = L.img.data;
+      const tt = tinted ? tint : 0;
+      for (let i = 0, j = 0; i < n; i++, j += 4) {
+        let R = r[i], G = g[i], B = b[i];
+        let m = R > G ? (R > B ? R : B) : (G > B ? G : B);
+        if (m < 0.002) { o[j + 3] = 0; continue; }
+        if (tt > 0) {
+          const lum = 0.299 * R + 0.587 * G + 0.114 * B;
+          R += (tr * lum * 1.6 - R) * tt; G += (tg * lum * 1.6 - G) * tt; B += (tb * lum * 1.6 - B) * tt;
+          m = R > G ? (R > B ? R : B) : (G > B ? G : B);
+          if (m < 0.002) { o[j + 3] = 0; continue; }
+        }
+        // Colour at full strength, with the amount of light carried in the alpha.
+        const amount = gain * (1 - Math.exp(-m * lift));
+        o[j] = (R / m) * 255; o[j + 1] = (G / m) * 255; o[j + 2] = (B / m) * 255;
+        o[j + 3] = amount >= 1 ? 255 : amount * 255;
+      }
+      lx.putImageData(L.img, 0, 0);
+      ctx.drawImage(L.c, (pad - mx * s) * k, (pad - my * s) * k, cw * s * k, ch * s * k);
+    };
+    if (P.bloom > 0) {
+      const z = P.bloomSize, a = P.bloom;
+      layer(1, 1.2 * z, 1.2 * z, Math.min(1, a * 0.3), 1.6, false);
+      layer(w > 140 ? 2 : 1, 4 * z, 4 * z, Math.min(1, a * 0.26), 2.6, true);
+      layer(w > 140 ? 4 : 2, 13 * z, 13 * z, Math.min(1, a * 0.24), 4.5, true);
+    }
+    if (P.streak > 0) {
+      const len = 4 + P.streak * 26;
+      layer(1, len * 0.4, 0, Math.min(1, P.streak * 0.5), 3, false);
+      layer(1, len, 0, Math.min(1, P.streak * 0.4), 6, true);
+    }
+    ctx.restore();
+  }
+
+  /** A ring of stray light around the frame, as an old lens shows when it looks at something bright. */
+  lensRing(ctx, W, H, P) {
+    const a = P.ring * Math.min(1, this.energy * 9);
+    if (a <= 0.004) return;
+    const cx = W / 2, cy = H / 2;
+    const R = 0.5 * Math.hypot(W, H) * 0.8 * P.ringSize;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const band = (centre, width, rgb, peak) => {
+      const r0 = Math.max(0, R * (centre - width)), r1 = R * (centre + width);
+      const g = ctx.createRadialGradient(cx, cy, r0, cx, cy, r1);
+      g.addColorStop(0, `rgba(${rgb},0)`);
+      g.addColorStop(0.5, `rgba(${rgb},${(peak * a).toFixed(3)})`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+    };
+    // Warm on the inside, cool on the outside, the way glass splits white light.
+    band(0.985, 0.13, '255,206,160', 0.2);
+    band(1.03, 0.15, '150,178,255', 0.22);
+    band(1.0, 0.3, '190,190,205', 0.1);
+    // A faint veil inside the ring.
+    const [vr, vg, vb] = hexToRgb(P.bloomTint > 0 ? P.bloomColor : '#8f95c8');
+    const v = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.92);
+    v.addColorStop(0, `rgba(${vr},${vg},${vb},${(0.1 * a).toFixed(3)})`);
+    v.addColorStop(0.8, `rgba(${vr},${vg},${vb},${(0.07 * a).toFixed(3)})`);
+    v.addColorStop(1, `rgba(${vr},${vg},${vb},0)`);
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, W, H);
+    ctx.restore();
+  }
+
   outSize(P, k) {
     const pad = Math.round(P.pad * Math.max(this.w, this.h));
     return { pad, W: (this.w + 2 * pad) * k, H: (this.h + 2 * pad) * k };
@@ -1018,9 +1264,11 @@ export class Engine {
     lx.globalAlpha = 1;
     lx.clearRect(0, 0, W, H);
     lx.imageSmoothingEnabled = false;
-    const shaped = k >= 3 && isShaped(P);
+    const typed = k >= 5 && charsOn(P);
+    const shaped = !typed && k >= 3 && isShaped(P);
     const ownColours = !P.customTint && customShape && (P.shapeMix === 'none' ? P.shape === 'custom' : shapeSet(P).includes('custom'));
-    if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0 || ownColours)) this.paintCells(lx, k, pad, P);
+    if (typed) this.paintChars(lx, k, pad, P);
+    else if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0 || ownColours)) this.paintCells(lx, k, pad, P);
     else {
       lx.drawImage(this.pix, pad * k, pad * k, this.w * k, this.h * k);
       if (shaped) {
@@ -1111,6 +1359,8 @@ export class Engine {
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
     }
+    if (P.bloom > 0 || P.streak > 0) this.highlights(ctx, k, pad, P);
+    if (P.ring > 0) this.lensRing(ctx, W, H, P);
     return { W, H, pad };
   }
 }

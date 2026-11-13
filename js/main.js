@@ -6,7 +6,8 @@ import { CONTROLS, CONTROL, TABS, LOOKS, KEEP, CAN_ANIMATE, defaults, PALETTES, 
 import { extractPalette, sortByLuma } from './palettes.js';
 import { loadFile, sampleSource, SAMPLES, cameraSource, recordClip } from './sources.js';
 import { exportPNG, exportGIF, exportMP4, exportWebM, exportScale, canMP4 } from './export.js';
-import { exportAPNG, exportSheet, exportSticker, exportSVG, zipStore } from './more-export.js';
+import { exportAPNG, exportSheet, exportSticker, exportSVG, exportText, zipStore } from './more-export.js';
+import { charsOn, forgetInk } from './chars.js';
 import { keyAt, setKey, removeKey, valueAt, cleanKeys } from './keys.js';
 import { Painter } from './paint.js';
 
@@ -103,7 +104,7 @@ function visP() {
   return o;
 }
 
-const COLOUR_KEYS = ['glow', 'glowSize', 'scan', 'aberr', 'shapeVar', 'palHue', 'palSat', 'palLight', 'gap', 'shapeRot'];
+const COLOUR_KEYS = ['glow', 'glowSize', 'scan', 'aberr', 'shapeVar', 'palHue', 'palSat', 'palLight', 'gap', 'shapeRot', 'bloom', 'bloomSize', 'bloomTint', 'streak', 'ring', 'ringSize', 'hot', 'charFade', 'charSize'];
 
 const app = {
   P,
@@ -223,6 +224,12 @@ function setP(k, v, { silent = false } = {}) {
     for (const x of ['customTint', 'shape', 'grid']) updateControls(x);
   }
   if (k === 'text') syncStageMode();
+  // Characters need room to be read.
+  if (k === 'chars' && v !== 'off' && P.grid > 132 && !P.keys.grid) {
+    P.grid = 96;
+    updateControls('grid');
+    toast('Resolution lowered to 96 so the characters are large enough to read');
+  }
   if (!silent) {
     updateControls(k);
     if (k === 'palHue' || k === 'palSat' || k === 'palLight') renderSwatches();
@@ -291,7 +298,15 @@ function surprise() {
   P.rate = Math.round(r(6, 16));
   if (chance(0.3)) P.hue = Math.round(r(-60, 60));
   if (chance(0.35)) { P.glow = r(0.3, 0.9); P.glowSize = r(0.7, 1.8); }
-  if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows', 'round']); P.grid = Math.min(P.grid, 160); }
+  if (chance(0.14)) {
+    P.chars = pick(['letters', 'letters', 'ascii', 'blocks', 'braille', 'lines', 'binary']);
+    P.grid = pick([64, 76, 88, 100]);
+    if (chance(0.6)) P.algo = 'none';
+    P.shimmer = 0;
+    P.charShuffle = r(0.2, 0.9);
+    if (chance(0.5)) P.charFlicker = r(0.1, 0.5);
+    P.hotBlock = chance(0.6);
+  } else if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows', 'round']); P.grid = Math.min(P.grid, 160); }
   else if (chance(0.15)) {
     P.grid = pick([56, 64, 72, 88]);
     P.gap = r(0.06, 0.2);
@@ -311,6 +326,15 @@ function surprise() {
   if (chance(0.25)) P.glint = r(0.3, 0.8);
   if (chance(0.15)) P.scan = r(0.2, 0.5);
   if (chance(0.12)) P.aberr = r(0.3, 1);
+  if (chance(0.22)) {
+    P.bloom = r(0.5, 1.4);
+    P.bloomSize = r(0.7, 1.6);
+    P.hot = r(0.5, 0.8);
+    if (chance(0.5)) { P.bloomTint = r(0.3, 0.8); P.bloomColor = hslToHex(Math.random() * 360, 0.9, 0.7); }
+    if (chance(0.5)) P.streak = r(0.2, 0.7);
+    if (chance(0.4)) P.ring = r(0.3, 0.8);
+  }
+  if (P.glint > 0 && chance(0.4)) P.glintDark = r(0.4, 0.85);
   if (chance(0.2)) P.pscale = 2;
   if (chance(0.12)) { P.burst = pick(['explode', 'scatter', 'fall', 'rise', 'blow', 'swirl']); P.burstLen = r(0.2, 0.4); }
   if (chance(0.12)) { P.cycle = pick([-1, 1]); P.cycleMode = pick(['hue', 'hue', 'shift']); }
@@ -451,6 +475,9 @@ function buildRail() {
 
 function showTab(id) {
   activeTab = id;
+  clearSearch();
+  $('#tabTitle').textContent = TABS.find((x) => x.id === id).name;
+  syncReset();
   for (const b of rail.children) {
     b.classList.toggle('on', b.dataset.tab === id);
     // On a phone the tabs are one scrolling row: keep the open one in sight.
@@ -616,7 +643,7 @@ function pickShape(sid) {
 let shapeNote;
 function buildPanel() {
   for (const tab of TABS) {
-    const node = el('div.tab', { 'data-tab': tab.id });
+    const node = el('div.tab', { 'data-tab': tab.id, 'data-name': tab.name });
     tabEls[tab.id] = node;
     panel.append(node);
     if (tab.id === 'looks') buildLooksTab(node);
@@ -625,7 +652,7 @@ function buildPanel() {
     if (tab.id === 'paint') buildPaintTab(node);
     if (tab.id === 'motion') buildKeysGroup(node);
     if (tab.id === 'shape') {
-      shapeNote = el('p.note.warn', { hidden: true, text: 'The pixels are too small on screen to show a shape. Lower the resolution below.' });
+      shapeNote = el('p.note.warn', { hidden: true, text: 'The pixels are too small on screen to show a shape or a character. Lower the resolution below.' });
       node.append(shapeNote);
     }
     let group = null, name = '';
@@ -664,6 +691,126 @@ function refreshVisibility() {
     ui[k].root.hidden = c.show ? !c.show(V, S) : false;
   }
   for (const g of groups) g.hidden = g._ctls.every((k) => ui[k].root.hidden);
+  syncReset();
+  if (searchText) searchSoon();
+}
+
+// ---------- reset one section ----------
+/** The settings a section owns: what its Reset button puts back. */
+const tabKeys = (id) => CONTROLS.filter((c) => c.tab === id && c.k && c.type !== 'hidden' && c.type !== 'button').map((c) => c.k);
+const RESETTABLE = new Set(['source', 'tone', 'dither', 'motion', 'finish', 'shape', 'text']);
+
+function changedIn(id) {
+  if (!RESETTABLE.has(id)) return false;
+  const base = defaults();
+  return tabKeys(id).some((k) => P.keys[k] || JSON.stringify(P[k]) !== JSON.stringify(base[k]));
+}
+/** Reset shows only while the open section has something to put back. */
+function syncReset() {
+  $('#btnResetTab').hidden = !!searchText || !changedIn(activeTab);
+}
+function resetTab() {
+  const id = activeTab;
+  if (!changedIn(id)) return;
+  const base = defaults();
+  for (const k of tabKeys(id)) { P[k] = base[k]; delete P.keys[k]; }
+  touchLook();
+  if (src && tabKeys(id).includes('invert')) { const L = loopLen(); renorm(src.frame(srcTime(t), L > 0 ? (t / L) % 1 : 0)); }
+  refreshAll();
+  thumbsSoon();
+  commit();
+  toast(TABS.find((x) => x.id === id).name + ' is back to its defaults. Undo brings your settings back.');
+}
+
+// ---------- search ----------
+// Typing in the search field shows matching settings from every section at once.
+let searchText = '';
+const LISTS = '.stack, .row, .looks, .pal-list';
+function clearSearch() {
+  if (!searchText && !panel.classList.contains('searching')) return;
+  searchText = '';
+  $('#search').value = '';
+  panel.classList.remove('searching');
+  for (const n of panel.querySelectorAll('.hit, .has-hit')) n.classList.remove('hit', 'has-hit');
+  for (const n of panel.querySelectorAll('[data-miss]')) { n.hidden = false; delete n.dataset.miss; }
+  $('#searchEmpty').hidden = true;
+}
+function runSearch(text) {
+  const q = String(text || '').trim().toLowerCase();
+  if (!q) {
+    clearSearch();
+    $('#tabTitle').textContent = TABS.find((x) => x.id === activeTab).name;
+    syncReset();
+    return;
+  }
+  searchText = q;
+  panel.classList.add('searching');
+  panel.scrollTop = 0;
+  for (const n of panel.querySelectorAll('.hit, .has-hit')) n.classList.remove('hit', 'has-hit');
+  for (const n of panel.querySelectorAll('[data-miss]')) { n.hidden = false; delete n.dataset.miss; }
+  const has = (n) => n.textContent.toLowerCase().includes(q);
+  let found = 0, looks = false;
+  for (const tab of TABS) {
+    const node = tabEls[tab.id];
+    const whole = tab.id !== 'looks' && tab.name.toLowerCase().includes(q);
+    let tabHit = false;
+    for (const g of node.querySelectorAll(':scope > .group')) {
+      if (g.hidden) continue;
+      const h = g.querySelector(':scope > h3');
+      const all = whole || (!!h && has(h));
+      let groupHit = false;
+      for (const c of g.children) {
+        if (c === h || (c.hidden && !c.dataset.miss)) continue;
+        if (c.matches(LISTS)) {
+          // A list of buttons: keep the ones that match.
+          let any = false;
+          for (const b of c.children) {
+            if (b.hidden && !b.dataset.miss) continue;
+            const ok = all || has(b);
+            if (ok) any = true;
+            else { b.hidden = true; b.dataset.miss = '1'; }
+          }
+          if (any) { c.classList.add('hit'); groupHit = true; found++; if (c.matches('.looks')) looks = true; }
+        } else if (all || (c.matches('.ctl') && has(c))) {
+          c.classList.add('hit');
+          groupHit = true;
+          found++;
+        }
+      }
+      if (groupHit) { g.classList.add('has-hit'); tabHit = true; }
+    }
+    if (tabHit) node.classList.add('has-hit');
+  }
+  const empty = $('#searchEmpty');
+  empty.hidden = found > 0;
+  empty.textContent = found ? '' : 'Nothing is called “' + String(text).trim() + '”. Try a shorter word, such as glow, grain or speed.';
+  $('#tabTitle').textContent = 'Search';
+  $('#btnResetTab').hidden = true;
+  if (looks) renderThumbs();
+}
+const searchSoon = debounce(() => { if (searchText) runSearch($('#search').value); }, 200);
+
+// ---------- stars ----------
+/** How many people starred the project on GitHub. Asked once in a while, kept in this browser. */
+async function loadStars() {
+  const out = $('#starCount');
+  const show = (n) => {
+    if (!Number.isFinite(n) || n < 0) return;
+    out.textContent = n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
+    out.hidden = false;
+    $('#star').title = 'Star Nightgrain on GitHub · ' + n + (n === 1 ? ' star' : ' stars');
+  };
+  const kept = store('ng.stars');
+  if (kept) show(kept.n);
+  if (kept && Date.now() - kept.at < 30 * 60e3) return;
+  try {
+    const r = await fetch('https://api.github.com/repos/winchxyz/nightgrain', { headers: { Accept: 'application/vnd.github+json' } });
+    if (!r.ok) return;
+    const n = (await r.json()).stargazers_count;
+    if (!Number.isFinite(n)) return;
+    store('ng.stars', { n, at: Date.now() });
+    show(n);
+  } catch (e) { /* offline or rate-limited: the button still works as a link */ }
 }
 
 function refreshAll() {
@@ -687,10 +834,9 @@ function buildLooksTab(node) {
   const g = el('section.group');
   looksGrid = el('div.looks');
   g.append(
+    looksGrid,
     el('div.row', null,
-      el('button.btn', { type: 'button', text: 'Surprise me', 'data-hint': 'Roll a random combination of pattern, palette and effects.', onclick: surprise }),
-      el('button.btn', { type: 'button', text: 'Save this look', 'data-hint': 'Keep the current settings as your own look. It is stored in this browser.', onclick: saveLook })),
-    looksGrid);
+      el('button.btn', { type: 'button', text: 'Save this look', 'data-hint': 'Keep the current settings as your own look. It is stored in this browser.', onclick: saveLook })));
   node.append(g);
   rebuildLookCards();
 }
@@ -748,7 +894,7 @@ function saveLook() {
 }
 
 function renderThumbs() {
-  if (!src || activeTab !== 'looks' || busy) return;
+  if (!src || (activeTab !== 'looks' && !searchText) || busy) return;
   const L = loopLen();
   let drawable;
   try { drawable = src.frame(srcTime(t), L > 0 ? (t / L) % 1 : 0); } catch (e) { return; }
@@ -758,12 +904,13 @@ function renderThumbs() {
   for (const { look, cv } of lookCards) {
     const lp = Object.assign({}, base, keep, look.p, { aspect: '1:1', pad: 0, intro: 'none', burst: 'none' });
     if (lp.shape === 'custom' && !hasCustomShape()) lp.shape = 'square';
+    const typed = charsOn(lp);
     const shaped = isShaped(lp);
     const fine = shaped && (lp.shapeMix !== 'none' || !['gap', 'dot', 'diamond', 'rows', 'cols', 'round'].includes(lp.shape));
-    lp.grid = fine ? 28 : shaped ? 56 : 96;
+    lp.grid = typed ? 36 : fine ? 28 : shaped ? 56 : 96;
     lp.pal = look.p.pal || base.pal;
     thumbEngine.render(lp, drawable, src.w, src.h, t, L);
-    thumbEngine.compose(cv, fine ? 8 : shaped ? 4 : 2, lp);
+    thumbEngine.compose(cv, typed ? 7 : fine ? 8 : shaped ? 4 : 2, lp);
   }
 }
 const thumbsSoon = debounce(renderThumbs, 250);
@@ -1268,6 +1415,14 @@ function buildExportTab(node) {
       mk('Sprite sheet', 'sheet', 'Every frame of the loop laid out in one PNG, for games and web animation.'),
       mk('SVG', 'svg', 'The frame you see now as vector shapes that stay sharp at any size, for print or a plotter. Glow, scanlines and colour fringe are left out.'))));
 
+  node.append(el('section.group', null, el('h3', { text: 'As text' }),
+    el('p.note', { text: 'The frame you see now, written in real characters you can paste anywhere. With characters off, the pixels are packed into braille.' }),
+    el('div.stack', null,
+      mk('Copy as text', 'copytext', 'Copy the picture as plain text. Paste it into a chat, a README or a code comment and view it in a fixed-width font.'),
+      mk('Text file', 'txt', 'Save the picture as a plain .txt file.'),
+      mk('Terminal colours', 'ansi', 'A text file with ANSI colour codes. Print it in a terminal with cat or type to see it in colour. Keep the resolution near your terminal width.'),
+      mk('Web page', 'html', 'A small HTML page with the picture as coloured, selectable text.'))));
+
   const batchBtn = el('button.btn.wide', { type: 'button', text: 'Choose files', 'data-hint': 'Pick several images, GIFs or videos. Each one gets the current look and they are saved together.',
     onclick: async () => { const files = await pickFiles(ACCEPT, true); if (files.length) runBatch(files, batchKind); } });
   exButtons.push(batchBtn);
@@ -1324,6 +1479,10 @@ async function exportOne(kind, progress, signal) {
     r = await exportSVG(app);
     return { ...r, tag: '', text: `Saved SVG · ${r.w} × ${r.h}` };
   }
+  if (kind === 'txt' || kind === 'copytext' || kind === 'ansi' || kind === 'html') {
+    r = await exportText(app, kind === 'copytext' ? 'txt' : kind);
+    return { ...r, tag: '', text: `Saved ${kind === 'ansi' ? 'terminal text' : kind === 'html' ? 'web page' : 'text'} · ${r.cols} × ${r.rows} characters` };
+  }
   throw new Error('Unknown format.');
 }
 
@@ -1376,6 +1535,9 @@ async function runExport(kind) {
     else if (kind === 'copy') {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': res.blob })]);
       toast('Copied to the clipboard');
+    } else if (kind === 'copytext') {
+      await navigator.clipboard.writeText(res.string);
+      toast(`Copied as text · ${res.cols} × ${res.rows} characters`);
     } else {
       downloadBlob(res.blob, `nightgrain-${stamp()}${res.tag}.${res.ext}`);
       toast(`${res.text} · ${sizeText(res.blob.size)}`, 4600);
@@ -1519,6 +1681,7 @@ async function openSource(next, { keepOld = false } = {}) {
   updateFileCard();
   refreshAll();
   lastSig = '';
+  backdropAt = 0;
   setTimeout(renderThumbs, 60);
 }
 
@@ -1537,6 +1700,27 @@ async function openFile(file) {
 
 // ---------- drawing ----------
 const cmp = document.createElement('canvas');
+
+// The picture you opened, small and soft, fills the page behind the glass.
+const backdrop = $('#backdrop');
+let backdropAt = 0;
+function paintBackdrop(drawable) {
+  const now = performance.now();
+  if (now - backdropAt < 700) return;
+  backdropAt = now;
+  const W = 64, H = 40;
+  if (backdrop.width !== W) { backdrop.width = W; backdrop.height = H; }
+  const ctx = backdrop.getContext('2d');
+  const s = Math.max(W / src.w, H / src.h);
+  const dw = src.w * s, dh = src.h * s;
+  try {
+    ctx.fillStyle = '#101013';
+    ctx.fillRect(0, 0, W, H);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(drawable, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    backdrop.classList.add('ready');
+  } catch (e) { /* a frame that is not ready yet */ }
+}
 
 function viewScale() {
   const r = viewport.getBoundingClientRect();
@@ -1560,6 +1744,7 @@ function draw() {
   const Pe = liveP(t);
   app.Pe = Pe;
   engine.render(Pe, drawable, src.w, src.h, t, L);
+  paintBackdrop(drawable);
   const { k, aw, ah, dpr } = viewScale();
   if (compare) {
     const { pad, W, H } = engine.outSize(P, k);
@@ -1577,7 +1762,7 @@ function draw() {
   } else {
     engine.compose(view, k, Pe, { transparent: P.transparent });
   }
-  if (shapeNote) shapeNote.hidden = !(k < 3 && isShaped(Pe));
+  if (shapeNote) shapeNote.hidden = !(charsOn(Pe) ? k < 5 : k < 3 && isShaped(Pe));
   view.classList.toggle('checker', P.transparent && !compare);
   view.style.imageRendering = view.width / dpr > aw / dpr + 1 || view.height / dpr > ah / dpr + 1 ? 'auto' : 'pixelated';
   const cw = view.width / dpr, ch = view.height / dpr;
@@ -1775,6 +1960,20 @@ function bindChrome() {
   $('#btnUndo').addEventListener('click', undo);
   $('#btnRedo').addEventListener('click', redo);
   $('#btnPlay').addEventListener('click', () => setPlaying(!playing));
+  $('#btnExport').addEventListener('click', () => showTab('export'));
+  $('#btnSurprise').addEventListener('click', surprise);
+  $('#btnResetTab').addEventListener('click', resetTab);
+  const search = $('#search');
+  search.addEventListener('input', () => runSearch(search.value));
+  // A phone has room for one word.
+  const narrow = window.matchMedia('(max-width: 880px)');
+  const namePlace = () => { search.placeholder = narrow.matches ? 'Search' : 'Search settings'; };
+  narrow.addEventListener('change', namePlace);
+  namePlace();
+  search.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { clearSearch(); search.blur(); showTab(activeTab); }
+  });
+  loadStars();
   const cmpBtn = $('#btnCompare');
   const setCompare = (on) => { if (compare === on) return; compare = on; cmpBtn.classList.toggle('on', on); dirty = true; };
   cmpBtn.addEventListener('pointerdown', (e) => { cmpBtn.setPointerCapture(e.pointerId); setCompare(true); });
@@ -1795,6 +1994,7 @@ function bindChrome() {
     const typing = tag === 'textarea' || (tag === 'input' && !['range', 'color', 'file'].includes(e.target.type));
     if (typing) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (e.key === '/' && !mod) { e.preventDefault(); $('#search').focus(); return; }
     if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
     else if (mod && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
     else if (mod && e.key.toLowerCase() === 's') { e.preventDefault(); runExport('png'); }
@@ -1819,6 +2019,10 @@ function start() {
   bindStage();
   bindChrome();
   setPlaying(true);
+  // Characters are drawn with the embedded font; redraw them once it has arrived.
+  if (document.fonts && document.fonts.load) {
+    document.fonts.load('500 16px "Geist Mono"').then(() => { forgetInk(); engine.tiles.clear(); thumbEngine.tiles.clear(); dirty = true; thumbsSoon(); }).catch(() => {});
+  }
   openSource(sampleSource('moon'));
   showTab(saved && saved.tab && tabEls[saved.tab] ? saved.tab : 'looks');
   commit();
@@ -1850,5 +2054,7 @@ window.NG = {
   record: recordCamera,
   undo, redo,
   surprise,
+  search: runSearch,
+  resetTab,
   sleep,
 };

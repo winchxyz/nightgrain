@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Nightgrain — dither art from any image, GIF or video</title>
-<meta name="description" content="Turn any image, GIF or video into shimmering dithered pixel art. Dither patterns, palettes, pixel shapes, keyframes, a brush, text, and PNG, GIF, MP4, SVG and sticker export. Free, runs in your browser.">
+<meta name="description" content="Turn any image, GIF or video into shimmering dithered pixel art or glowing character art. Dither patterns, palettes, pixel shapes, letters and braille, bloom, keyframes, a brush, and PNG, GIF, MP4, SVG, text and sticker export. Free, runs in your browser.">
 <meta name="theme-color" content="#0a0a0c">
 <meta property="og:title" content="Nightgrain">
 <meta property="og:description" content="Turn any image, GIF or video into shimmering dithered pixel art.">
@@ -17,62 +17,87 @@
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="./" aria-label="Nightgrain">
-    <svg viewBox="0 0 32 32" width="26" height="26" shape-rendering="crispEdges" aria-hidden="true">
-      <rect width="32" height="32" rx="7" fill="#000"/>
-      <g fill="#fafef9"><rect x="13" y="4" width="9" height="3"/><rect x="10" y="7" width="6" height="3"/><rect x="7" y="10" width="6" height="9"/><rect x="7" y="19" width="9" height="3"/><rect x="10" y="22" width="12" height="3"/><rect x="13" y="25" width="9" height="3"/></g>
-      <g fill="#f8932e"><rect x="19" y="4" width="3" height="3"/><rect x="13" y="7" width="3" height="3"/><rect x="10" y="13" width="3" height="3"/><rect x="13" y="19" width="3" height="3"/><rect x="19" y="22" width="3" height="3"/><rect x="22" y="19" width="3" height="3"/></g>
-      <g fill="#2573ed"><rect x="16" y="10" width="3" height="3"/><rect x="22" y="13" width="3" height="3"/><rect x="16" y="16" width="3" height="3"/><rect x="25" y="7" width="3" height="3"/></g>
-      <g fill="#4fb652"><rect x="19" y="13" width="3" height="3"/><rect x="25" y="16" width="3" height="3"/></g>
-    </svg>
-    <span>Nightgrain</span>
-  </a>
-  <div class="top-actions">
-    <button class="btn" id="btnOpen" type="button">Open file</button>
-    <span class="sep"></span>
-    <button class="icon-btn" id="btnUndo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">
-      <svg viewBox="0 0 24 24"><path d="M9 7 4.5 11.5 9 16"/><path d="M5 11.500h9a5 5 0 0 1 0 10h-2"/></svg>
-    </button>
-    <button class="icon-btn" id="btnRedo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-      <svg viewBox="0 0 24 24"><path d="m15 7 4.500 4.500L15 16"/><path d="M19 11.500h-9a5 5 0 0 0 0 10h2"/></svg>
-    </button>
-    <button class="btn ghost" id="btnCompare" type="button" title="Hold to see the original">Original</button>
-    <a class="icon-btn" href="https://github.com/winchxyz/nightgrain" target="_blank" rel="noopener" title="Source on GitHub" aria-label="Source on GitHub">
-      <svg viewBox="0 0 24 24" class="fill"><path d="M12 2.500a9.500 9.500 0 0 0-3 18.510c.470.090.650-.200.650-.450v-1.700c-2.640.570-3.200-1.130-3.200-1.130-.430-1.100-1.050-1.390-1.050-1.390-.860-.590.070-.580.070-.580.950.070 1.450.980 1.450.980.850 1.450 2.220 1.030 2.760.790.090-.610.330-1.030.600-1.270-2.110-.240-4.330-1.050-4.330-4.690 0-1.040.370-1.880.980-2.550-.100-.240-.420-1.210.090-2.520 0 0 .800-.260 2.610.970a9 9 0 0 1 4.750 0c1.810-1.230 2.610-.970 2.610-.970.510 1.310.190 2.280.090 2.520.610.670.980 1.510.980 2.550 0 3.650-2.220 4.450-4.340 4.690.340.290.640.870.640 1.760v2.610c0 .250.170.550.660.450A9.500 9.500 0 0 0 12 2.500z"/></svg>
-    </a>
-  </div>
-</header>
+<canvas class="backdrop" id="backdrop" width="16" height="16" aria-hidden="true"></canvas>
 
-<main class="work">
+<div class="window">
+  <nav class="rail" aria-label="Sections">
+    <a class="mark" href="./" aria-label="Nightgrain" title="Nightgrain">
+      <svg viewBox="0 0 32 32" width="30" height="30" shape-rendering="crispEdges" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="#000"/>
+        <g fill="#fafef9"><rect x="13" y="4" width="9" height="3"/><rect x="10" y="7" width="6" height="3"/><rect x="7" y="10" width="6" height="9"/><rect x="7" y="19" width="9" height="3"/><rect x="10" y="22" width="12" height="3"/><rect x="13" y="25" width="9" height="3"/></g>
+        <g fill="#f8932e"><rect x="19" y="4" width="3" height="3"/><rect x="13" y="7" width="3" height="3"/><rect x="10" y="13" width="3" height="3"/><rect x="13" y="19" width="3" height="3"/><rect x="19" y="22" width="3" height="3"/><rect x="22" y="19" width="3" height="3"/></g>
+        <g fill="#2573ed"><rect x="16" y="10" width="3" height="3"/><rect x="22" y="13" width="3" height="3"/><rect x="16" y="16" width="3" height="3"/><rect x="25" y="7" width="3" height="3"/></g>
+        <g fill="#4fb652"><rect x="19" y="13" width="3" height="3"/><rect x="25" y="16" width="3" height="3"/></g>
+      </svg>
+    </a>
+    <div class="rail-tabs" id="rail"></div>
+  </nav>
+
+  <header class="top">
+    <label class="search" id="searchBox">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.500"/><path d="m16 16 4 4"/></svg>
+      <input type="search" id="search" placeholder="Search settings" autocomplete="off" spellcheck="false" aria-label="Search settings">
+      <kbd>/</kbd>
+    </label>
+    <div class="top-actions">
+      <button class="icon-btn" id="btnUndo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">
+        <svg viewBox="0 0 24 24"><path d="M9 7 4.500 11.500 9 16"/><path d="M5 11.500h9a5 5 0 0 1 0 10h-2"/></svg>
+      </button>
+      <button class="icon-btn" id="btnRedo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+        <svg viewBox="0 0 24 24"><path d="m15 7 4.500 4.500L15 16"/><path d="M19 11.500h-9a5 5 0 0 0 0 10h2"/></svg>
+      </button>
+      <button class="btn ghost" id="btnCompare" type="button" title="Hold to see the original">Original</button>
+      <a class="star" id="star" href="https://github.com/winchxyz/nightgrain" target="_blank" rel="noopener" title="Star Nightgrain on GitHub">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3.800 2.500 5.300 5.700.700-4.200 4 1.100 5.700L12 16.700l-5.100 2.800 1.100-5.700-4.200-4 5.700-.700z"/></svg>
+        <span>Star</span><b id="starCount" hidden></b>
+      </a>
+      <button class="btn ghost with-icon" id="btnOpen" type="button" title="Open an image, GIF or video (Ctrl+O)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.500V4.500"/><path d="M7.500 9 12 4.500 16.500 9"/><path d="M5 15.500v2.500a1.500 1.500 0 0 0 1.500 1.500h11A1.500 1.500 0 0 0 19 18v-2.500"/></svg>
+        <span>Open</span>
+      </button>
+      <button class="btn primary with-icon" id="btnExport" type="button" title="Save the picture, a GIF or a video">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4.500v11"/><path d="M7.500 11 12 15.500 16.500 11"/><path d="M5 19.500h14"/></svg>
+        <span>Export</span>
+      </button>
+    </div>
+  </header>
+
+  <aside class="side">
+    <div class="side-head">
+      <h1 id="tabTitle">Looks</h1>
+      <button class="btn small ghost" id="btnResetTab" type="button" title="Put every setting in this section back to its default" hidden>Reset</button>
+    </div>
+    <div class="panel-scroll" id="panel">
+      <p class="note empty" id="searchEmpty" hidden></p>
+    </div>
+    <div class="help" id="help">Hover any control to see what it does.</div>
+  </aside>
+
   <section class="stage">
     <div class="viewport" id="viewport">
       <canvas id="view" width="16" height="16"></canvas>
       <div class="pick-note" id="pickNote" hidden>Click the colour to remove</div>
       <div class="drop" id="drop" hidden><div>Drop an image, GIF or video</div></div>
     </div>
-    <div class="transport">
-      <button class="icon-btn" id="btnPlay" type="button" aria-label="Play or pause" title="Play or pause (Space)">
-        <svg viewBox="0 0 24 24" class="fill" id="icoPlay"><path d="M8 5.500v13l11-6.500z"/></svg>
-      </button>
-      <div class="scrub-wrap">
-        <input type="range" id="scrub" class="scrub" min="0" max="1" step="0.001" value="0" aria-label="Position in the loop">
-        <div class="ticks" id="ticks"></div>
+    <div class="dock">
+      <div class="transport">
+        <button class="icon-btn" id="btnPlay" type="button" aria-label="Play or pause" title="Play or pause (Space)">
+          <svg viewBox="0 0 24 24" class="fill" id="icoPlay"><path d="M8 5.500v13l11-6.500z"/></svg>
+        </button>
+        <div class="scrub-wrap">
+          <input type="range" id="scrub" class="scrub" min="0" max="1" step="0.001" value="0" aria-label="Position in the loop">
+          <div class="ticks" id="ticks"></div>
+        </div>
+        <span class="mono" id="timeLabel">0.0 / 4.8 s</span>
+        <span class="mono muted" id="infoLabel"></span>
       </div>
-      <span class="mono" id="timeLabel">0.0 / 4.8 s</span>
-      <span class="grow"></span>
-      <span class="mono muted" id="infoLabel"></span>
+      <button class="spark" id="btnSurprise" type="button" title="Roll a random combination of pattern, palette and effects">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.500 4l1.700 4.500 4.500 1.700-4.500 1.700-1.700 4.500-1.700-4.500L4.300 10.200l4.500-1.700z"/><path d="M17.800 14.800l.800 2 2 .800-2 .800-.800 2-.800-2-2-.800 2-.800z"/></svg>
+        <span>Surprise me</span>
+      </button>
     </div>
   </section>
-
-  <aside class="side">
-    <nav class="rail" id="rail" aria-label="Sections"></nav>
-    <div class="panel">
-      <div class="panel-scroll" id="panel"></div>
-      <div class="help" id="help">Hover any control to see what it does.</div>
-    </div>
-  </aside>
-</main>
+</div>
 
 <input type="file" id="file" accept="image/*,video/*,.gif,.webp,.apng,.mp4,.mov,.webm,.mkv" hidden>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>

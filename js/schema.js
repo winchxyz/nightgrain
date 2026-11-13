@@ -2,6 +2,7 @@
 
 import { ALGOS } from './dither.js';
 import { PALETTES, paletteById } from './palettes.js';
+import { CHAR_SETS } from './chars.js';
 
 const pct = (v) => Math.round(v * 100) + '%';
 const num = (d) => (v) => (+v).toFixed(d);
@@ -120,6 +121,8 @@ export const CONTROLS = [
   { tab: 'motion', group: 'Light', k: 'glintAngle', type: 'range', label: 'Glint angle', min: -90, max: 90, step: 1, def: 25, fmt: (v) => Math.round(v) + '°', show: (P) => P.glint > 0, hint: 'The direction the streak travels.' },
   { tab: 'motion', group: 'Light', k: 'glintWidth', type: 'range', label: 'Glint width', min: 0.02, max: 0.4, step: 0.005, def: 0.1, fmt: num(2), show: (P) => P.glint > 0, hint: 'How wide the streak is.' },
   { tab: 'motion', group: 'Light', k: 'glintN', type: 'range', label: 'Sweeps per loop', min: 1, max: 4, step: 1, def: 1, fmt: num(0), show: (P) => P.glint > 0, hint: 'How many times the streak passes in one loop.' },
+  { tab: 'motion', group: 'Light', k: 'glintDark', type: 'range', label: 'Dark outside the glint', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, show: (P) => P.glint > 0,
+    hint: 'Dims everything the streak is not touching, so it passes over the subject like a torch in the dark.' },
   { tab: 'motion', group: 'Light', k: 'pulse', type: 'range', label: 'Breathing', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Brightness slowly rises and falls.' },
   { tab: 'motion', group: 'Light', k: 'pulseN', type: 'range', label: 'Breaths per loop', min: 1, max: 6, step: 1, def: 1, fmt: num(0), show: (P) => P.pulse > 0, hint: 'How many times it breathes in one loop.' },
 
@@ -167,29 +170,53 @@ export const CONTROLS = [
   { tab: 'colour', group: 'Tint the picture', k: 'tintMove', type: 'range', label: 'Flow', min: -3, max: 3, step: 1, def: 0, fmt: signed(0), show: (P) => P.tint !== 'none' && P.tint !== 'solid',
     hint: 'The colours travel through the picture this many times per loop.' },
 
+  // ---- Shape: characters ----
+  { tab: 'shape', group: 'Characters', k: 'chars', type: 'chips', label: 'Draw pixels as characters', def: 'off',
+    options: [['off', 'Off'], ...CHAR_SETS],
+    hint: 'Every pixel becomes a character, heavier where the picture is brighter. Letters, the classic ramp, shaded blocks, braille dots, strokes that follow the edges, or your own text.' },
+  { tab: 'shape', group: 'Characters', k: 'charText', type: 'text', label: 'Your characters', def: '', max: 600, show: (P) => P.chars === 'custom',
+    hint: 'Any characters, a word or a whole sentence. Emoji work too.' },
+  { tab: 'shape', group: 'Characters', k: 'charOrder', type: 'chips', label: 'Place them', def: 'ink', show: (P) => P.chars === 'custom',
+    options: [['ink', 'By brightness'], ['typed', 'In reading order']],
+    hint: 'By brightness puts heavier characters on brighter cells. In reading order writes your text across the picture, line after line.' },
+  { tab: 'shape', group: 'Characters', k: 'charSize', type: 'range', label: 'Character size', min: 0.5, max: 1.6, step: 0.01, def: 1, fmt: pct, show: (P) => P.chars !== 'off' && P.chars !== 'blocks' && P.chars !== 'braille',
+    hint: 'How much of its cell a character fills.' },
+  { tab: 'shape', group: 'Characters', k: 'charBold', type: 'toggle', label: 'Bold', def: false, show: (P) => P.chars !== 'off' && P.chars !== 'blocks' && P.chars !== 'braille',
+    hint: 'Heavier letters, which read better when they are small.' },
+  { tab: 'shape', group: 'Characters', k: 'charFade', type: 'range', label: 'Dim cells fade', min: 0, max: 1, step: 0.01, def: 0.85, fmt: pct, show: (P) => P.chars !== 'off',
+    hint: 'Characters on darker cells are drawn fainter. At 0 every character is drawn at full strength.' },
+  { tab: 'shape', group: 'Characters', k: 'charMin', type: 'range', label: 'Faintest cell', min: 0.01, max: 0.6, step: 0.005, def: 0.05, fmt: pct, show: (P) => P.chars !== 'off',
+    hint: 'Cells darker than this stay empty.' },
+  { tab: 'shape', group: 'Characters', k: 'charShuffle', type: 'range', label: 'Variety', min: 0, max: 1, step: 0.01, def: 0.5, fmt: pct, show: (P) => ['letters', 'ascii', 'binary', 'custom'].includes(P.chars) && !(P.chars === 'custom' && P.charOrder === 'typed'),
+    hint: 'Lets neighbouring cells pick different characters of about the same weight, so no letter repeats in patches.' },
+  { tab: 'shape', group: 'Characters', k: 'charFlicker', type: 'range', label: 'Characters change', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, show: (P) => ['letters', 'ascii', 'binary', 'braille', 'custom'].includes(P.chars) && !(P.chars === 'custom' && P.charOrder === 'typed'),
+    hint: 'Cells swap their character now and then while the picture plays. Needs some Variety. The pace follows Shimmer speed (Motion).' },
+  { tab: 'shape', group: 'Characters', k: 'hotBlock', type: 'toggle', label: 'Brightest cells turn solid', def: true, show: (P) => P.chars !== 'off',
+    hint: 'Cells brighter than the highlight level (Finish) become solid blocks, which is what bloom grows from.' },
+
   // ---- Shape ----
-  { tab: 'shape', group: 'Pixel shape', k: 'shapeMix', type: 'chips', label: 'Use', def: 'none',
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeMix', type: 'chips', label: 'Use', def: 'none', show: (P) => P.chars === 'off',
     options: [['none', 'One shape'], ['colour', 'One per colour'], ['random', 'Scattered']],
     hint: 'One shape for every pixel, a different shape for each palette colour, or several shapes scattered at random.' },
-  { tab: 'shape', group: 'Pixel shape', k: 'shape', type: 'shape', label: 'Shape', def: 'square', also: ['shapeMix', 'shapeSet'],
+  { tab: 'shape', group: 'Pixel shape', k: 'shape', type: 'shape', label: 'Shape', def: 'square', also: ['shapeMix', 'shapeSet'], show: (P) => P.chars === 'off',
     hint: 'What each pixel looks like up close. With several shapes in use, click to add or remove one.' },
   { k: 'shapeSet', type: 'hidden', def: 'dot,diamond,plus,spark' },
-  { tab: 'shape', group: 'Pixel shape', k: 'gap', type: 'range', label: 'Spacing', min: 0.05, max: 0.6, step: 0.01, def: 0.18, fmt: pct, show: (P) => P.shape !== 'square' || P.shapeMix !== 'none',
+  { tab: 'shape', group: 'Pixel shape', k: 'gap', type: 'range', label: 'Spacing', min: 0.05, max: 0.6, step: 0.01, def: 0.18, fmt: pct, show: (P) => P.chars === 'off' && (P.shape !== 'square' || P.shapeMix !== 'none'),
     hint: 'The space between pixels. More spacing makes each shape smaller.' },
-  { tab: 'shape', group: 'Pixel shape', k: 'shapeRot', type: 'range', label: 'Turn', min: 0, max: 345, step: 15, def: 0, fmt: (v) => Math.round(v) + '°', show: (P) => P.shape !== 'square' || P.shapeMix !== 'none',
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeRot', type: 'range', label: 'Turn', min: 0, max: 345, step: 15, def: 0, fmt: (v) => Math.round(v) + '°', show: (P) => P.chars === 'off' && (P.shape !== 'square' || P.shapeMix !== 'none'),
     hint: 'Turn every shape. Try it with triangles, hearts and arrows.' },
-  { tab: 'shape', group: 'Pixel shape', k: 'shapeVar', type: 'range', label: 'Size follows brightness', min: 0, max: 1, step: 0.01, def: 0, fmt: pct,
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeVar', type: 'range', label: 'Size follows brightness', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, show: (P) => P.chars === 'off',
     hint: 'Darker palette colours get smaller pixels and brighter ones stay large, which adds depth.' },
-  { tab: 'shape', group: 'Your own pixel', k: 'customBtn', type: 'button', label: 'Use an image as the pixel', action: 'pickCustom',
+  { tab: 'shape', group: 'Your own pixel', k: 'customBtn', type: 'button', label: 'Use an image as the pixel', action: 'pickCustom', show: (P) => P.chars === 'off',
     hint: 'Pick a small picture, logo or icon. Every pixel of the art becomes a copy of it. It joins the shapes above.' },
-  { tab: 'shape', group: 'Your own pixel', k: 'customGlyph', type: 'text', label: 'Or type a letter or emoji', def: '', single: true, max: 4,
+  { tab: 'shape', group: 'Your own pixel', k: 'customGlyph', type: 'text', label: 'Or type a letter or emoji', def: '', single: true, max: 4, show: (P) => P.chars === 'off',
     hint: 'One character, such as ★ or 🙂 or A, used as the pixel.' },
   { k: 'customImg', type: 'hidden', def: '' },
-  { tab: 'shape', group: 'Your own pixel', k: 'customTint', type: 'toggle', label: 'Paint it with palette colours', def: true, show: (P) => !!(P.customImg || P.customGlyph),
+  { tab: 'shape', group: 'Your own pixel', k: 'customTint', type: 'toggle', label: 'Paint it with palette colours', def: true, show: (P) => P.chars === 'off' && !!(P.customImg || P.customGlyph),
     hint: 'On: only its outline is used and the palette colours it. Off: it keeps its own colours.' },
 
   { tab: 'shape', group: 'Pixel size', id: 'grid2', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, noAnim: true, fmt: (v) => Math.round(v) + ' px',
-    hint: 'Shapes need room. Fewer pixels across the picture means bigger ones, and shapes you can actually see.' },
+    hint: 'Shapes and characters need room. Fewer pixels across the picture means bigger ones that you can actually see.' },
 
   // ---- Text ----
   { tab: 'text', group: 'Words', k: 'text', type: 'text', label: 'Words on the picture', def: '', keep: true, max: 400,
@@ -209,6 +236,22 @@ export const CONTROLS = [
   { tab: 'finish', group: 'Screen', k: 'glowSize', type: 'range', label: 'Glow reach', min: 0.3, max: 4, step: 0.05, def: 1, fmt: num(2), show: (P) => P.glow > 0, hint: 'How far the glow spreads.' },
   { tab: 'finish', group: 'Screen', k: 'scan', type: 'range', label: 'Scanlines', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Dark lines between rows, like an old monitor.' },
   { tab: 'finish', group: 'Screen', k: 'aberr', type: 'range', label: 'Colour fringe', min: 0, max: 3, step: 0.05, def: 0, fmt: num(2), hint: 'Red and blue split apart sideways, like a misaligned screen.' },
+  { tab: 'finish', group: 'Highlights', k: 'bloom', type: 'range', label: 'Bloom', min: 0, max: 2, step: 0.01, def: 0, fmt: num(2),
+    hint: 'Only the brightest pixels pour light out, far and soft, the way a lens overexposes.' },
+  { tab: 'finish', group: 'Highlights', k: 'bloomSize', type: 'range', label: 'Bloom reach', min: 0.3, max: 3, step: 0.05, def: 1, fmt: num(2), show: (P) => P.bloom > 0,
+    hint: 'How far the bloom spreads.' },
+  { tab: 'finish', group: 'Highlights', k: 'bloomTint', type: 'range', label: 'Bloom tint', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, show: (P) => P.bloom > 0 || P.streak > 0 || P.ring > 0,
+    hint: 'Colour the spilled light instead of leaving it the colour of the pixels it comes from.' },
+  { tab: 'finish', group: 'Highlights', k: 'bloomColor', type: 'color', label: 'Tint colour', def: '#9d8cff', show: (P) => P.bloomTint > 0 && (P.bloom > 0 || P.streak > 0 || P.ring > 0),
+    hint: 'The colour of the tinted light.' },
+  { tab: 'finish', group: 'Highlights', k: 'streak', type: 'range', label: 'Streaks', min: 0, max: 1, step: 0.01, def: 0, fmt: pct,
+    hint: 'Thin flares shoot sideways out of the brightest pixels.' },
+  { tab: 'finish', group: 'Highlights', k: 'ring', type: 'range', label: 'Lens ring', min: 0, max: 1, step: 0.01, def: 0, fmt: pct,
+    hint: 'A faint ring of stray light around the frame. It brightens and fades with the picture.' },
+  { tab: 'finish', group: 'Highlights', k: 'ringSize', type: 'range', label: 'Ring size', min: 0.5, max: 1.6, step: 0.01, def: 1, fmt: num(2), show: (P) => P.ring > 0,
+    hint: 'How wide the ring is.' },
+  { tab: 'finish', group: 'Highlights', k: 'hot', type: 'range', label: 'Highlights start at', min: 0.2, max: 1, step: 0.01, def: 0.72, fmt: pct, show: (P) => P.bloom > 0 || P.streak > 0 || (P.chars !== 'off' && P.hotBlock),
+    hint: 'How bright a pixel has to be to count as a highlight. Lower it and more of the picture glows.' },
   { tab: 'finish', group: 'Canvas', k: 'pad', type: 'range', label: 'Margin', min: 0, max: 0.3, step: 0.005, def: 0, noAnim: true, fmt: pct, hint: 'Empty backdrop around the picture.' },
 
   // ---- Export ----
@@ -278,6 +321,12 @@ export const LOOKS = [
   { id: 'confetti', name: 'Confetti', p: { pal: pal('rosewindow'), algo: 'bayer4', grid: 72, shapeMix: 'random', shapeSet: 'dot,tri,plus,diamond,star', gap: 0.12, sat: 1.6, shimmer: 0.25, edge: 0.4 } },
   { id: 'shatter', name: 'Shatter', p: { pal: pal('relic'), grid: 180, burst: 'explode', burstLen: 0.32, burstDist: 0.9, shimmer: 0.4, edge: 0.5 } },
   { id: 'carousel', name: 'Carousel', p: { pal: pal('aurora'), algo: 'blue', grid: 220, cycle: 1, shimmer: 0.3, glow: 0.3, edge: 0.4 } },
+  { id: 'lumen', name: 'Lumen', p: { pal: pal('lumen'), chars: 'letters', grid: 84, algo: 'none', sat: 0, contrast: 0.3, edge: 0.45, shimmer: 0, charShuffle: 0.8, charFlicker: 0.25, charFade: 0.9, charMin: 0.04, hot: 0.8, bloom: 1, bloomSize: 1.1, bloomTint: 0.55, bloomColor: '#8f86ff', streak: 0.5, ring: 0.6, glint: 0.4, glintDark: 0.65, glintWidth: 0.26, glintAngle: 18 } },
+  { id: 'terminal', name: 'Terminal', p: { pal: pal('phosphor'), chars: 'ascii', mode: 'ramp', grid: 96, algo: 'none', charShuffle: 0, charFade: 0.55, scan: 0.25, glow: 0.55, glowSize: 1.3, shimmer: 0, edge: 0.4 } },
+  { id: 'typewriter', name: 'Typewriter', p: { pal: pal('newsprint'), chars: 'ascii', grid: 92, algo: 'none', sat: 0, contrast: 0.2, charBold: true, charShuffle: 0.25, charFade: 0.35, hotBlock: false, shimmer: 0, edge: 0.3, black: 0.04 } },
+  { id: 'ansi', name: 'ANSI', p: { pal: pal('ansi16'), chars: 'blocks', grid: 88, algo: 'bayer4', sat: 1.7, charFade: 0, hotBlock: false, shimmer: 0.1, edge: 0.3 } },
+  { id: 'braille', name: 'Braille', p: { pal: pal('moonsteel'), chars: 'braille', mode: 'ramp', grid: 100, algo: 'none', contrast: 0.35, exposure: 0.6, charFade: 0.1, hotBlock: false, shimmer: 0, edge: 0.6, glow: 0.5 } },
+  { id: 'outline', name: 'Line art', p: { pal: pal('blueprint'), chars: 'lines', mode: 'ramp', grid: 96, algo: 'none', charBold: true, charFade: 0.6, hotBlock: false, shimmer: 0, edge: 0.9, sharpen: 1 } },
   { id: 'starlight', name: 'Starlight', p: { pal: pal('frost'), algo: 'blue', mode: 'ramp', grid: 88, shape: 'spark', shapeVar: 0.8, gap: 0.08, glow: 0.6, glowSize: 0.8, shimmer: 0.4, sparkle: 0.2 } },
 ];
 
