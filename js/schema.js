@@ -8,8 +8,10 @@ const num = (d) => (v) => (+v).toFixed(d);
 const signed = (d) => (v) => (v > 0 ? '+' : '') + (+v).toFixed(d);
 
 /**
- * type: range | chips | select | toggle | color
- * keep: true -> not part of a look (framing, clip, export); survives look changes.
+ * type: range | chips | algo | shape | toggle | color | text | button | hidden
+ * keep: true -> not part of a look (framing, clip, words, export); survives look changes.
+ * noAnim: true -> a slider that cannot be keyframed (it would resize the picture or the loop).
+ * id: only when one setting appears in two tabs.
  */
 export const CONTROLS = [
   // ---- Source: framing ----
@@ -29,14 +31,37 @@ export const CONTROLS = [
   { tab: 'source', group: 'Frame', k: 'flipX', type: 'toggle', label: 'Mirror', def: false, keep: true, hint: 'Flip the source left to right.' },
   { tab: 'source', group: 'Frame', k: 'flipY', type: 'toggle', label: 'Upside down', def: false, keep: true, hint: 'Flip the source top to bottom.' },
 
+  // ---- Source: symmetry ----
+  { tab: 'source', group: 'Mirror', k: 'sym', type: 'chips', label: 'Mirror', def: 'none', keep: true,
+    options: [['none', 'Off'], ['h', 'Left to right'], ['v', 'Top to bottom'], ['quad', 'Four ways'], ['kal', 'Kaleidoscope']],
+    hint: 'Mirror one half of the picture onto the other, or fold it into a kaleidoscope.' },
+  { tab: 'source', group: 'Mirror', k: 'symN', type: 'range', label: 'Segments', min: 2, max: 16, step: 1, def: 6, keep: true, fmt: num(0), show: (P) => P.sym === 'kal',
+    hint: 'How many mirrored pairs of wedges the kaleidoscope has.' },
+  { tab: 'source', group: 'Mirror', k: 'symTurn', type: 'range', label: 'Turn', min: -180, max: 180, step: 1, def: 0, keep: true, fmt: (v) => signed(0)(v) + '°', show: (P) => P.sym === 'kal',
+    hint: 'Which slice of the picture the kaleidoscope repeats. Give it keyframes and the pattern keeps changing.' },
+
+  // ---- Source: frame shape ----
+  { tab: 'source', group: 'Frame shape', k: 'frame', type: 'chips', label: 'Cut the picture to', def: 'none', keep: true,
+    options: [['none', 'Rectangle'], ['round', 'Rounded'], ['circle', 'Circle'], ['diamond', 'Diamond'], ['hex', 'Hexagon'], ['star', 'Star'], ['heart', 'Heart'], ['custom', 'My image']],
+    hint: 'Keep only the part of the picture inside a shape. My image uses the outline of a picture you choose.' },
+  { k: 'frameImg', type: 'hidden', def: '', keep: true },
+  { tab: 'source', group: 'Frame shape', k: 'frameSize', type: 'range', label: 'Size', min: 0.3, max: 1, step: 0.01, def: 1, keep: true, fmt: pct, show: (P) => P.frame !== 'none',
+    hint: 'How much of the frame the shape fills.' },
+  { tab: 'source', group: 'Frame shape', k: 'frameRound', type: 'range', label: 'Corner radius', min: 0.02, max: 0.5, step: 0.01, def: 0.16, keep: true, fmt: pct, show: (P) => P.frame === 'round',
+    hint: 'How round the corners are.' },
+  { tab: 'source', group: 'Frame shape', k: 'frameSoft', type: 'range', label: 'Soft edge', min: 0, max: 0.3, step: 0.005, def: 0.01, keep: true, fmt: pct, show: (P) => P.frame !== 'none',
+    hint: 'A soft edge dissolves into scattered pixels instead of a clean cut.' },
+  { tab: 'source', group: 'Frame shape', k: 'frameBtn', type: 'button', label: 'Choose another image', action: 'pickFrame', show: (P) => P.frame === 'custom',
+    hint: 'Pick a picture with a transparent background, or a dark shape on white. Its outline becomes the frame.' },
+
   // ---- Source: clip ----
-  { tab: 'source', group: 'Clip', k: 'trimA', type: 'range', label: 'Start', min: 0, max: 0.98, step: 0.001, def: 0, keep: true, fmt: pct, show: (P, S) => S.clip,
+  { tab: 'source', group: 'Clip', k: 'trimA', type: 'range', label: 'Start', min: 0, max: 0.98, step: 0.001, def: 0, keep: true, noAnim: true, fmt: pct, show: (P, S) => S.clip,
     hint: 'Where the clip starts, as a share of the whole video or GIF.' },
-  { tab: 'source', group: 'Clip', k: 'trimB', type: 'range', label: 'End', min: 0.02, max: 1, step: 0.001, def: 1, keep: true, fmt: pct, show: (P, S) => S.clip,
+  { tab: 'source', group: 'Clip', k: 'trimB', type: 'range', label: 'End', min: 0.02, max: 1, step: 0.001, def: 1, keep: true, noAnim: true, fmt: pct, show: (P, S) => S.clip,
     hint: 'Where the clip ends.' },
-  { tab: 'source', group: 'Clip', k: 'speed', type: 'range', label: 'Speed', min: 0.25, max: 4, step: 0.05, def: 1, keep: true, fmt: (v) => v.toFixed(2) + '×', show: (P, S) => S.clip,
+  { tab: 'source', group: 'Clip', k: 'speed', type: 'range', label: 'Speed', min: 0.25, max: 4, step: 0.05, def: 1, keep: true, noAnim: true, fmt: (v) => v.toFixed(2) + '×', show: (P, S) => S.clip,
     hint: 'Play the clip slower or faster.' },
-  { tab: 'source', group: 'Clip', k: 'loop', type: 'range', label: 'Loop length', min: 1, max: 12, step: 0.1, def: 4.8, keep: true, fmt: (v) => v.toFixed(1) + ' s', show: (P, S) => !S.clip,
+  { tab: 'source', group: 'Clip', k: 'loop', type: 'range', label: 'Loop length', min: 1, max: 12, step: 0.1, def: 4.8, keep: true, noAnim: true, fmt: (v) => v.toFixed(1) + ' s', show: (P, S) => !S.clip,
     hint: 'How long one loop of the animation lasts. Exports use this length.' },
 
   // ---- Tone ----
@@ -74,7 +99,7 @@ export const CONTROLS = [
   { tab: 'tone', group: 'Trails', k: 'windRows', type: 'range', label: 'How many rows', min: 0.05, max: 1, step: 0.01, def: 0.45, fmt: pct, show: (P) => P.wind > 0, hint: 'Only some rows get a trail, which keeps it looking like scattered dust.' },
 
   // ---- Dither ----
-  { tab: 'dither', group: 'Pixels', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, fmt: (v) => Math.round(v) + ' px', hint: 'Pixels along the longer side. Fewer pixels means a chunkier picture.' },
+  { tab: 'dither', group: 'Pixels', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, noAnim: true, fmt: (v) => Math.round(v) + ' px', hint: 'Pixels along the longer side. Fewer pixels means a chunkier picture.' },
   { tab: 'dither', group: 'Pattern', k: 'algo', type: 'algo', label: 'Dither', def: 'bayer8', hint: 'How the few palette colours are mixed into smooth tones.' },
   { tab: 'dither', group: 'Pattern', k: 'mode', type: 'chips', label: 'Colour from', def: 'match',
     options: [['match', 'Source colours'], ['ramp', 'Brightness']],
@@ -86,7 +111,7 @@ export const CONTROLS = [
 
   // ---- Motion ----
   { tab: 'motion', group: 'Grain', k: 'shimmer', type: 'range', label: 'Shimmer', min: 0, max: 1, step: 0.01, def: 0.35, fmt: pct, hint: 'The grain keeps reshuffling, so even a still picture feels alive.' },
-  { tab: 'motion', group: 'Grain', k: 'rate', type: 'range', label: 'Shimmer speed', min: 1, max: 30, step: 1, def: 10, fmt: (v) => Math.round(v) + ' / s', hint: 'How many times per second the grain changes.' },
+  { tab: 'motion', group: 'Grain', k: 'rate', type: 'range', label: 'Shimmer speed', min: 1, max: 30, step: 1, def: 10, noAnim: true, fmt: (v) => Math.round(v) + ' / s', hint: 'How many times per second the grain changes.' },
   { tab: 'motion', group: 'Grain', k: 'sparkle', type: 'range', label: 'Sparkles', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Random pixels flash in the brightest colour.' },
   { tab: 'motion', group: 'Grain', k: 'driftX', type: 'range', label: 'Pattern drift sideways', min: -3, max: 3, step: 1, def: 0, fmt: signed(0), show: (P) => !isDiff(P.algo) && P.algo !== 'none', hint: 'The dither pattern slides sideways over the picture.' },
   { tab: 'motion', group: 'Grain', k: 'driftY', type: 'range', label: 'Pattern drift up or down', min: -3, max: 3, step: 1, def: 0, fmt: signed(0), show: (P) => !isDiff(P.algo) && P.algo !== 'none', hint: 'The dither pattern slides vertically over the picture.' },
@@ -103,6 +128,22 @@ export const CONTROLS = [
     hint: 'How the picture assembles itself at the start of the loop.' },
   { tab: 'motion', group: 'Entrance', k: 'introLen', type: 'range', label: 'Takes', min: 0.05, max: 0.5, step: 0.01, def: 0.3, fmt: (v) => pct(v) + ' of loop', show: (P) => P.intro !== 'none', hint: 'How much of the loop the entrance takes.' },
   { tab: 'motion', group: 'Entrance', k: 'outro', type: 'toggle', label: 'Leave the same way', def: true, show: (P) => P.intro !== 'none', hint: 'The picture disappears at the end, so the loop closes cleanly.' },
+
+  { tab: 'motion', group: 'Break apart', k: 'burst', type: 'chips', label: 'Pixels fly', def: 'none',
+    options: [['none', 'Off'], ['explode', 'Outward'], ['scatter', 'Everywhere'], ['fall', 'Down'], ['rise', 'Up'], ['blow', 'Sideways'], ['swirl', 'In a swirl']],
+    hint: 'The picture breaks into loose pixels that fly off, and gathers itself back.' },
+  { tab: 'motion', group: 'Break apart', k: 'burstWhen', type: 'chips', label: 'When', def: 'both', show: (P) => P.burst !== 'none',
+    options: [['both', 'Gather, then break'], ['start', 'Gather at the start'], ['end', 'Break at the end']],
+    hint: 'Gather at the start, break at the end, or both, which makes the loop close cleanly.' },
+  { tab: 'motion', group: 'Break apart', k: 'burstLen', type: 'range', label: 'Takes', min: 0.05, max: 0.5, step: 0.01, def: 0.3, fmt: (v) => pct(v) + ' of loop', show: (P) => P.burst !== 'none', hint: 'How much of the loop the flight takes.' },
+  { tab: 'motion', group: 'Break apart', k: 'burstDist', type: 'range', label: 'Distance', min: 0.1, max: 2, step: 0.01, def: 0.8, fmt: num(2), show: (P) => P.burst !== 'none', hint: 'How far the pixels travel.' },
+  { tab: 'motion', group: 'Break apart', k: 'burstStagger', type: 'range', label: 'One by one', min: 0, max: 1, step: 0.01, def: 0.6, fmt: pct, show: (P) => P.burst !== 'none', hint: 'At 0 every pixel leaves at once. Higher lets them go a few at a time.' },
+
+  { tab: 'motion', group: 'Colour cycling', k: 'cycle', type: 'range', label: 'Turns per loop', min: -4, max: 4, step: 1, def: 0, noAnim: true, fmt: signed(0),
+    hint: 'The palette keeps changing while the picture stays. 0 is off; whole turns keep the loop seamless.' },
+  { tab: 'motion', group: 'Colour cycling', k: 'cycleMode', type: 'chips', label: 'How', def: 'hue', show: (P) => P.cycle !== 0,
+    options: [['hue', 'Hues turn'], ['shift', 'Colours swap places']],
+    hint: 'Turn every colour smoothly around the colour wheel, or step the palette colours along one place at a time.' },
 
   // ---- Colour (the palette itself is built by hand in main.js) ----
   { tab: 'colour', group: 'Adjust all colours', k: 'palHue', type: 'range', label: 'Hue', min: -180, max: 180, step: 1, def: 0, fmt: (v) => signed(0)(v) + '°',
@@ -139,15 +180,36 @@ export const CONTROLS = [
     hint: 'Turn every shape. Try it with triangles, hearts and arrows.' },
   { tab: 'shape', group: 'Pixel shape', k: 'shapeVar', type: 'range', label: 'Size follows brightness', min: 0, max: 1, step: 0.01, def: 0, fmt: pct,
     hint: 'Darker palette colours get smaller pixels and brighter ones stay large, which adds depth.' },
-  { tab: 'shape', group: 'Pixel size', id: 'grid2', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, fmt: (v) => Math.round(v) + ' px',
+  { tab: 'shape', group: 'Your own pixel', k: 'customBtn', type: 'button', label: 'Use an image as the pixel', action: 'pickCustom',
+    hint: 'Pick a small picture, logo or icon. Every pixel of the art becomes a copy of it. It joins the shapes above.' },
+  { tab: 'shape', group: 'Your own pixel', k: 'customGlyph', type: 'text', label: 'Or type a letter or emoji', def: '', single: true, max: 4,
+    hint: 'One character, such as ★ or 🙂 or A, used as the pixel.' },
+  { k: 'customImg', type: 'hidden', def: '' },
+  { tab: 'shape', group: 'Your own pixel', k: 'customTint', type: 'toggle', label: 'Paint it with palette colours', def: true, show: (P) => !!(P.customImg || P.customGlyph),
+    hint: 'On: only its outline is used and the palette colours it. Off: it keeps its own colours.' },
+
+  { tab: 'shape', group: 'Pixel size', id: 'grid2', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, noAnim: true, fmt: (v) => Math.round(v) + ' px',
     hint: 'Shapes need room. Fewer pixels across the picture means bigger ones, and shapes you can actually see.' },
+
+  // ---- Text ----
+  { tab: 'text', group: 'Words', k: 'text', type: 'text', label: 'Words on the picture', def: '', keep: true, max: 400,
+    hint: 'Type something. The words are dithered together with the picture. Drag them on the picture to move them.' },
+  { tab: 'text', group: 'Words', k: 'textFont', type: 'chips', label: 'Typeface', def: 'sans', keep: true, show: (P) => !!P.text,
+    options: [['sans', 'Sans'], ['serif', 'Serif'], ['mono', 'Mono']], hint: 'The style of the letters.' },
+  { tab: 'text', group: 'Words', k: 'textUpper', type: 'toggle', label: 'Capitals', def: true, keep: true, show: (P) => !!P.text, hint: 'Set the words in capital letters.' },
+  { tab: 'text', group: 'Words', k: 'textSize', type: 'range', label: 'Size', min: 0.03, max: 0.6, step: 0.005, def: 0.11, keep: true, fmt: pct, show: (P) => !!P.text, hint: 'Letter height as a share of the picture height.' },
+  { tab: 'text', group: 'Words', k: 'textSpace', type: 'range', label: 'Letter spacing', min: -0.05, max: 0.8, step: 0.01, def: 0.12, keep: true, fmt: num(2), show: (P) => !!P.text, hint: 'Space between the letters.' },
+  { tab: 'text', group: 'Words', k: 'textColor', type: 'color', label: 'Colour', def: '#ffffff', keep: true, show: (P) => !!P.text, hint: 'The colour of the words before dithering. The palette decides the final colours.' },
+  { tab: 'text', group: 'Place', k: 'textX', type: 'range', label: 'Across', min: 0, max: 1, step: 0.005, def: 0.5, keep: true, fmt: pct, show: (P) => !!P.text, hint: 'Left to right. You can also drag the words on the picture.' },
+  { tab: 'text', group: 'Place', k: 'textY', type: 'range', label: 'Up and down', min: 0, max: 1, step: 0.005, def: 0.88, keep: true, fmt: pct, show: (P) => !!P.text, hint: 'Top to bottom. You can also drag the words on the picture.' },
+  { tab: 'text', group: 'Place', k: 'textRot', type: 'range', label: 'Turn', min: -180, max: 180, step: 1, def: 0, keep: true, fmt: (v) => signed(0)(v) + '°', show: (P) => !!P.text, hint: 'Turn the words.' },
 
   // ---- Finish ----
   { tab: 'finish', group: 'Screen', k: 'glow', type: 'range', label: 'Glow', min: 0, max: 1.5, step: 0.01, def: 0, fmt: num(2), hint: 'Lit pixels bleed light into the dark around them.' },
   { tab: 'finish', group: 'Screen', k: 'glowSize', type: 'range', label: 'Glow reach', min: 0.3, max: 4, step: 0.05, def: 1, fmt: num(2), show: (P) => P.glow > 0, hint: 'How far the glow spreads.' },
   { tab: 'finish', group: 'Screen', k: 'scan', type: 'range', label: 'Scanlines', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Dark lines between rows, like an old monitor.' },
   { tab: 'finish', group: 'Screen', k: 'aberr', type: 'range', label: 'Colour fringe', min: 0, max: 3, step: 0.05, def: 0, fmt: num(2), hint: 'Red and blue split apart sideways, like a misaligned screen.' },
-  { tab: 'finish', group: 'Canvas', k: 'pad', type: 'range', label: 'Margin', min: 0, max: 0.3, step: 0.005, def: 0, fmt: pct, hint: 'Empty backdrop around the picture.' },
+  { tab: 'finish', group: 'Canvas', k: 'pad', type: 'range', label: 'Margin', min: 0, max: 0.3, step: 0.005, def: 0, noAnim: true, fmt: pct, hint: 'Empty backdrop around the picture.' },
 
   // ---- Export ----
   { tab: 'export', group: 'Size', k: 'exSize', type: 'chips', label: 'Longer side', def: 1024, keep: true,
@@ -170,6 +232,8 @@ export const TABS = [
   { id: 'dither', name: 'Dither' },
   { id: 'colour', name: 'Colour' },
   { id: 'shape', name: 'Shape' },
+  { id: 'paint', name: 'Paint' },
+  { id: 'text', name: 'Text' },
   { id: 'motion', name: 'Motion' },
   { id: 'finish', name: 'Finish' },
   { id: 'export', name: 'Export' },
@@ -177,12 +241,15 @@ export const TABS = [
 
 export function defaults() {
   const P = {};
-  for (const c of CONTROLS) P[c.k] = c.def;
+  for (const c of CONTROLS) if (c.type !== 'button') P[c.k] = c.def;
   P.pal = [...paletteById('relic').colors];
+  P.keys = {};
   return P;
 }
 
 export const KEEP = new Set(CONTROLS.filter((c) => c.keep).map((c) => c.k));
+/** Sliders that can be keyframed. */
+export const CAN_ANIMATE = new Set(CONTROLS.filter((c) => c.type === 'range' && !c.noAnim).map((c) => c.k));
 export const CONTROL = Object.fromEntries(CONTROLS.map((c) => [c.k, c]));
 
 const pal = (id) => [...paletteById(id).colors];
@@ -209,6 +276,8 @@ export const LOOKS = [
   { id: 'halo', name: 'Halo', p: { pal: pal('aurora'), algo: 'bayer8', grid: 200, edge: 1.6, edgeFill: 0.25, glow: 0.6, shimmer: 0.45, intro: 'radial', introLen: 0.25 } },
   { id: 'prism', name: 'Prism', p: { pal: pal('primaries'), algo: 'blue', grid: 240, tint: 'rainbow', tintAngle: 60, tintMove: 1, tintAmt: 0.9, shimmer: 0.3, edge: 0.5 } },
   { id: 'confetti', name: 'Confetti', p: { pal: pal('rosewindow'), algo: 'bayer4', grid: 72, shapeMix: 'random', shapeSet: 'dot,tri,plus,diamond,star', gap: 0.12, sat: 1.6, shimmer: 0.25, edge: 0.4 } },
+  { id: 'shatter', name: 'Shatter', p: { pal: pal('relic'), grid: 180, burst: 'explode', burstLen: 0.32, burstDist: 0.9, shimmer: 0.4, edge: 0.5 } },
+  { id: 'carousel', name: 'Carousel', p: { pal: pal('aurora'), algo: 'blue', grid: 220, cycle: 1, shimmer: 0.3, glow: 0.3, edge: 0.4 } },
   { id: 'starlight', name: 'Starlight', p: { pal: pal('frost'), algo: 'blue', mode: 'ramp', grid: 88, shape: 'spark', shapeVar: 0.8, gap: 0.08, glow: 0.6, glowSize: 0.8, shimmer: 0.4, sparkle: 0.2 } },
 ];
 

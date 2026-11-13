@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Nightgrain — dither art from any image, GIF or video</title>
-<meta name="description" content="Turn any image, GIF or video into shimmering dithered pixel art. 18 dither patterns, 22 palettes, motion, glow, and PNG, GIF and MP4 export. Free, runs in your browser.">
+<meta name="description" content="Turn any image, GIF or video into shimmering dithered pixel art. Dither patterns, palettes, pixel shapes, keyframes, a brush, text, and PNG, GIF, MP4, SVG and sticker export. Free, runs in your browser.">
 <meta name="theme-color" content="#0a0a0c">
 <meta property="og:title" content="Nightgrain">
 <meta property="og:description" content="Turn any image, GIF or video into shimmering dithered pixel art.">
@@ -55,7 +55,10 @@
       <button class="icon-btn" id="btnPlay" type="button" aria-label="Play or pause" title="Play or pause (Space)">
         <svg viewBox="0 0 24 24" class="fill" id="icoPlay"><path d="M8 5.500v13l11-6.500z"/></svg>
       </button>
-      <input type="range" id="scrub" class="scrub" min="0" max="1" step="0.001" value="0" aria-label="Position in the loop">
+      <div class="scrub-wrap">
+        <input type="range" id="scrub" class="scrub" min="0" max="1" step="0.001" value="0" aria-label="Position in the loop">
+        <div class="ticks" id="ticks"></div>
+      </div>
       <span class="mono" id="timeLabel">0.0 / 4.8 s</span>
       <span class="grow"></span>
       <span class="mono muted" id="infoLabel"></span>

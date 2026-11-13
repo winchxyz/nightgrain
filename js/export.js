@@ -22,7 +22,7 @@ export async function exportPNG(app) {
   await app.renderAt(app.time());
   const k = exportScale(P, app.engine);
   const c = document.createElement('canvas');
-  app.engine.compose(c, k, P, { transparent: P.transparent });
+  app.engine.compose(c, k, app.live(), { transparent: P.transparent });
   return { blob: await toBlob(c, 'image/png'), w: c.width, h: c.height };
 }
 
@@ -59,7 +59,8 @@ export async function exportGIF(app, onProgress, signal) {
   const k = exportScale(P, engine);
   const { W, H } = engine.outSize(P, k);
   if (W * H * frames > 900e6) throw new Error('That GIF would be enormous. Pick a smaller size, a lower frame rate or a shorter loop.');
-  const pure = isPure(P, k);
+  // Exact-palette GIFs need a picture made only of palette colours that never change.
+  const pure = isPure(P, k) && app.steadyColours();
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   let writer, mapper;
@@ -70,10 +71,10 @@ export async function exportGIF(app, onProgress, signal) {
   } else {
     // Sample a few frames to build one shared 256-colour table.
     const samples = [];
-    const picks = Math.min(frames, 5);
+    const picks = Math.min(frames, app.steadyColours() ? 5 : 12);
     for (let i = 0; i < picks; i++) {
       await app.renderAt((Math.floor((i * frames) / picks) / frames) * L);
-      engine.compose(canvas, k, P);
+      engine.compose(canvas, k, app.live());
       samples.push(ctx.getImageData(0, 0, W, H).data);
       onProgress(0.1 * ((i + 1) / picks), 'Reading colours');
       if (signal.cancelled) return null;
@@ -94,7 +95,7 @@ export async function exportGIF(app, onProgress, signal) {
     if (pure) {
       writer.addFrame(indexFrame(engine, P, k), delay, { transparent: P.transparent ? 0 : -1 });
     } else {
-      engine.compose(canvas, k, P);
+      engine.compose(canvas, k, app.live());
       writer.addFrame(mapper(ctx.getImageData(0, 0, W, H).data), delay);
     }
     onProgress((pure ? 0 : 0.1) + (pure ? 1 : 0.9) * ((f + 1) / frames), `Frame ${f + 1} of ${frames}`);
@@ -153,7 +154,7 @@ export async function exportMP4(app, onProgress, signal) {
       if (signal.cancelled) { enc.close(); return null; }
       if (failure) throw failure;
       await app.renderAt((f / frames) * L);
-      engine.compose(art, k, P);
+      engine.compose(art, k, app.live());
       ox.fillStyle = P.pal[0];
       ox.fillRect(0, 0, W, H);
       ox.drawImage(art, 0, 0);
@@ -183,7 +184,7 @@ export async function exportWebM(app, onProgress, signal) {
   await app.renderAt(0);
   const k = Math.min(exportScale(P, engine), Math.max(1, Math.floor(1920 / Math.max(engine.w, engine.h))));
   const canvas = document.createElement('canvas');
-  engine.compose(canvas, k, P);
+  engine.compose(canvas, k, app.live());
   const stream = canvas.captureStream(P.fps);
   const type = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
   if (!type) throw new Error('This browser cannot record video. Save a GIF instead.');
@@ -197,7 +198,7 @@ export async function exportWebM(app, onProgress, signal) {
     const t = (performance.now() - t0) / 1000;
     if (t >= L || signal.cancelled) break;
     await app.renderAt(t);
-    engine.compose(canvas, k, P);
+    engine.compose(canvas, k, app.live());
     onProgress(t / L, 'Recording');
     await new Promise((r) => requestAnimationFrame(r));
   }

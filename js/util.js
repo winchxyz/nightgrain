@@ -26,8 +26,11 @@ export function mulberry32(seed) {
   };
 }
 
+// A palette colour that is switched off is stored with a leading "!".
+export const hexOf = (c) => (c[0] === '!' ? c.slice(1) : c);
+
 export function hexToRgb(hex) {
-  let h = String(hex).replace('#', '').trim();
+  let h = String(hex).replace(/[!#]/g, '').trim();
   if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
   const n = parseInt(h, 16);
   if (!Number.isFinite(n) || h.length !== 6) return [0, 0, 0];

@@ -86,6 +86,71 @@ class VideoSource {
   }
 }
 
+/** A live camera. Record a clip from it to get something that can be trimmed and saved as animation. */
+class CameraSource {
+  constructor(el, stream) {
+    this.kind = 'camera';
+    this.animated = true;
+    this.el = el;
+    this.stream = stream;
+    this.w = el.videoWidth || 640;
+    this.h = el.videoHeight || 480;
+    this.name = 'Camera';
+    this.duration = 0;
+  }
+  frame() { return this.el; }
+  async seek() {}
+  dispose() {
+    for (const t of this.stream.getTracks()) t.stop();
+    this.el.srcObject = null;
+  }
+}
+
+export async function cameraSource() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('This browser has no camera access.');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false });
+  } catch (e) {
+    throw new Error(e && e.name === 'NotAllowedError' ? 'The camera was not allowed. Allow it in the browser and try again.' : 'No camera could be opened.');
+  }
+  const el = document.createElement('video');
+  el.muted = true;
+  el.playsInline = true;
+  el.srcObject = stream;
+  await el.play();
+  for (let i = 0; i < 80 && !el.videoWidth; i++) await new Promise((r) => setTimeout(r, 50));
+  if (!el.videoWidth) {
+    for (const t of stream.getTracks()) t.stop();
+    throw new Error('The camera did not send a picture.');
+  }
+  return new CameraSource(el, stream);
+}
+
+/** Grab frames from a live source for a few seconds and return them as an animation. */
+export async function recordClip(source, seconds, fps, onProgress) {
+  const s = Math.min(1, 640 / Math.max(source.w, source.h));
+  const w = Math.max(2, Math.round(source.w * s)), h = Math.max(2, Math.round(source.h * s));
+  const frames = [];
+  const t0 = performance.now();
+  let next = 0;
+  for (;;) {
+    const el = (performance.now() - t0) / 1000;
+    if (el >= seconds) break;
+    if (el >= next) {
+      const c = mk(w, h);
+      c.getContext('2d').drawImage(source.frame(), 0, 0, w, h);
+      frames.push({ img: c, at: el });
+      next += 1 / fps;
+      if (onProgress) onProgress(el / seconds);
+    }
+    await new Promise((r) => requestAnimationFrame(r));
+  }
+  if (!frames.length) throw new Error('Nothing was recorded.');
+  frames.total = seconds;
+  return new FramesSource(frames, w, h, 'Camera clip');
+}
+
 // Keep decoded animations inside a memory budget by shrinking large ones.
 function frameScale(w, h, count) {
   const budget = 220e6;

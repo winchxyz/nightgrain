@@ -1,6 +1,6 @@
 // The render pipeline: source frame -> tone -> detail -> mask -> dither -> pixels -> finish.
 
-import { clamp, smooth, hash, hexToRgb, adjustHex, hslToHex } from './util.js';
+import { clamp, smooth, hash, hexToRgb, adjustHex, hslToHex, hexOf } from './util.js';
 import { dither } from './dither.js';
 
 const TAU = Math.PI * 2;
@@ -12,7 +12,15 @@ export const SHAPES = [
   ['plus', 'Plus'], ['cross', 'Cross'], ['star', 'Star'], ['spark', 'Spark'], ['heart', 'Heart'], ['tri', 'Triangle'],
   ['hex', 'Hexagon'], ['moon', 'Moon'], ['arrow', 'Arrow'], ['rows', 'Rows'], ['cols', 'Columns'], ['slash', 'Slash'],
 ];
-const SHAPE_IDS = new Set(SHAPES.map((s) => s[0]));
+const SHAPE_IDS = new Set([...SHAPES.map((s) => s[0]), 'custom']);
+
+// The user's own pixel (an image or a typed character) and their own frame image.
+// Shared by every engine; the version numbers keep the caches honest.
+let customShape = null, customVer = 0;
+let frameImage = null, frameVer = 0;
+export function setCustomShape(c) { customShape = c || null; customVer++; }
+export function setFrameImage(c) { frameImage = c || null; frameVer++; }
+export const hasCustomShape = () => !!customShape;
 
 /** The shapes in use when several are mixed. */
 export function shapeSet(P) {
@@ -22,6 +30,21 @@ export function shapeSet(P) {
 
 /** True when pixels are drawn as anything other than plain full squares. */
 export const isShaped = (P) => P.shape !== 'square' || P.shapeMix !== 'none' || P.shapeVar > 0;
+
+function heartPath(x, a) {
+  x.moveTo(0, a * 0.88);
+  x.bezierCurveTo(-a * 1.35, a * 0.05, -a * 0.75, -a * 1.0, 0, -a * 0.38);
+  x.bezierCurveTo(a * 0.75, -a * 1.0, a * 1.35, a * 0.05, 0, a * 0.88);
+  x.closePath();
+}
+function roundedPath(x, hw, hh, c) {
+  x.moveTo(-hw + c, -hh);
+  x.lineTo(hw - c, -hh); x.quadraticCurveTo(hw, -hh, hw, -hh + c);
+  x.lineTo(hw, hh - c); x.quadraticCurveTo(hw, hh, hw - c, hh);
+  x.lineTo(-hw + c, hh); x.quadraticCurveTo(-hw, hh, -hw, hh - c);
+  x.lineTo(-hw, -hh + c); x.quadraticCurveTo(-hw, -hh, -hw + c, -hh);
+  x.closePath();
+}
 
 function polygon(x, pts) {
   x.moveTo(pts[0][0], pts[0][1]);
@@ -71,11 +94,19 @@ export function paintShape(x, shape, k, gap = 0.18, rot = 0, scale = 1) {
   else if (shape === 'gap') { const a = r * (1 - gap); x.rect(-a, -a, 2 * a, 2 * a); }
   else if (shape === 'rows') { const a = r * (1 - gap); x.rect(-k, -a, 2 * k, 2 * a); }
   else if (shape === 'cols') { const a = r * (1 - gap); x.rect(-a, -k, 2 * a, 2 * k); }
-  else if (shape === 'round') {
-    const a = r * (1.04 - gap * 0.7), c = a * 0.62;
-    x.moveTo(-a + c, -a);
-    x.arcTo(a, -a, a, a, c); x.arcTo(a, a, -a, a, c); x.arcTo(-a, a, -a, -a, c); x.arcTo(-a, -a, a, -a, c);
-    x.closePath();
+  else if (shape === 'custom') {
+    if (customShape) {
+      const a = r * (1.12 - gap);
+      x.imageSmoothingEnabled = true;
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(customShape, -a, -a, 2 * a, 2 * a);
+      x.restore();
+      return;
+    }
+    x.rect(-r, -r, 2 * r, 2 * r);
+  } else if (shape === 'round') {
+    const a = r * (1.04 - gap * 0.7);
+    roundedPath(x, a, a, a * 0.7);
   } else if (shape === 'dot') x.arc(0, 0, Math.max(0.6, r * (1.08 - gap * 1.2)), 0, TAU);
   else if (shape === 'ring') {
     const a = Math.max(0.8, r * (1.1 - gap));
@@ -91,13 +122,8 @@ export function paintShape(x, shape, k, gap = 0.18, rot = 0, scale = 1) {
     x.rect(-th, -a, 2 * th, 2 * a);
   } else if (shape === 'star') { const a = r * (1.22 - gap); x.translate(0, a * 0.06); polygon(x, starPoints(5, a, a * 0.46)); }
   else if (shape === 'spark') { const a = r * (1.25 - gap); polygon(x, starPoints(4, a, a * 0.3)); }
-  else if (shape === 'heart') {
-    const a = r * (1.16 - gap);
-    x.moveTo(0, a * 0.88);
-    x.bezierCurveTo(-a * 1.35, a * 0.05, -a * 0.75, -a * 1.0, 0, -a * 0.38);
-    x.bezierCurveTo(a * 0.75, -a * 1.0, a * 1.35, a * 0.05, 0, a * 0.88);
-    x.closePath();
-  } else if (shape === 'tri') { const a = r * (1.16 - gap); polygon(x, [[0, -a * 0.92], [a, a * 0.8], [-a, a * 0.8]]); }
+  else if (shape === 'heart') heartPath(x, r * (1.16 - gap));
+  else if (shape === 'tri') { const a = r * (1.16 - gap); polygon(x, [[0, -a * 0.92], [a, a * 0.8], [-a, a * 0.8]]); }
   else if (shape === 'hex') { const a = r * (1.2 - gap); polygon(x, starPoints(6, a, a * 0.866).filter((_, i) => i % 2 === 0)); }
   else if (shape === 'moon') {
     const a = Math.max(0.8, r * (1.1 - gap));
@@ -123,11 +149,17 @@ export function paintShape(x, shape, k, gap = 0.18, rot = 0, scale = 1) {
 
 let liveSig = '';
 let liveOut = null;
+/** The colours actually drawn: switched-off colours left out, adjustments applied. */
 export function livePalette(P) {
-  if (!P.palHue && P.palSat === 1 && !P.palLight) return P.pal;
   const sig = P.pal.join(',') + '|' + P.palHue + '|' + P.palSat + '|' + P.palLight;
   if (sig !== liveSig) {
-    liveOut = P.pal.map((c, i) => (i === 0 ? c : adjustHex(c, P.palHue, P.palSat, P.palLight)));
+    const adj = P.palHue || P.palSat !== 1 || P.palLight;
+    liveOut = [];
+    P.pal.forEach((c, i) => {
+      if (i > 0 && c[0] === '!') return;
+      liveOut.push(i === 0 || !adj ? hexOf(c) : adjustHex(hexOf(c), P.palHue, P.palSat, P.palLight));
+    });
+    if (liveOut.length < 2) liveOut.push('#ffffff');
     liveSig = sig;
   }
   return liveOut;
@@ -293,6 +325,8 @@ export class Engine {
     this.T2 = new Float32Array(n);
     this.T3 = new Float32Array(n);
     this.idx = new Uint8Array(n);
+    this.idx2 = new Uint8Array(n);
+    this.lit = new Uint8Array(n);
     this.pimg = this.pctx.createImageData(w, h);
   }
 
@@ -304,6 +338,8 @@ export class Engine {
     const { w, h } = gridSize(P, sw, sh);
     if (w !== this.w || h !== this.h) this.alloc(w, h);
     drawFrame(this.wctx, w, h, src, sw, sh, P);
+    if (P.sym !== 'none') this.symmetry(P, w, h);
+    if (P.text) this.drawText(P, w, h);
     const d = this.wctx.getImageData(0, 0, w, h).data;
     this.raw = d;
     const n = w * h;
@@ -436,6 +472,13 @@ export class Engine {
         M[i] *= smooth(lo, hi, Math.sqrt(dr * dr + dg * dg + db * db));
       }
     }
+    // V: what the frame shape, the corner fade and the entrance let through. Kept apart
+    // from M so that painted pixels obey it too.
+    const V = T3;
+    const fm = P.frame !== 'none' ? this.frameMask(P, w, h) : null;
+    const entering = P.intro !== 'none' && P.introLen > 0;
+    const useV = P.vig > 0 || !!fm || entering;
+    if (useV) V.fill(1);
     if (P.vig > 0) {
       const cx = w / 2, cy = h / 2;
       const size = P.vigSize;
@@ -443,19 +486,48 @@ export class Engine {
         const dy = (y + 0.5 - cy) / cy;
         for (let x = 0; x < w; x++) {
           const dx = (x + 0.5 - cx) / cx;
-          M[y * w + x] *= 1 - P.vig * smooth(size, size + 0.6, Math.sqrt(dx * dx + dy * dy));
+          V[y * w + x] *= 1 - P.vig * smooth(size, size + 0.6, Math.sqrt(dx * dx + dy * dy));
         }
       }
     }
-    if (P.intro !== 'none' && P.introLen > 0) {
+    if (fm) for (let i = 0; i < n; i++) V[i] *= fm[i];
+    if (entering) {
       const tin = phase / P.introLen;
       const tout = P.outro ? (1 - phase) / P.introLen : 9;
       const vis = clamp(Math.min(tin, tout));
-      if (vis < 1) this.reveal(M, w, h, P.intro, vis);
+      if (vis < 1) this.reveal(V, w, h, P.intro, vis);
     }
-    for (let i = 0; i < n; i++) {
-      const m = M[i];
-      if (m < 1) { R[i] *= m; G[i] *= m; B[i] *= m; }
+    const pt = this.paint && this.paint.used ? this.paint : null;
+    if (!pt) {
+      for (let i = 0; i < n; i++) {
+        const m = useV ? M[i] * V[i] : M[i];
+        if (m < 1) { R[i] *= m; G[i] *= m; B[i] *= m; }
+      }
+    } else {
+      // Hand painting: the eraser hides pixels, the brush lays colour over the picture.
+      const lit = this.lit;
+      lit.fill(0);
+      const pw = pt.w, ph = pt.h, er = pt.erase, pc = pt.col;
+      for (let y = 0; y < h; y++) {
+        const prow = Math.min(ph - 1, ((y + 0.5) / h * ph) | 0) * pw;
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          const j = prow + Math.min(pw - 1, ((x + 0.5) / w * pw) | 0);
+          const v = useV ? V[i] : 1;
+          let m = M[i] * v;
+          const e = er[j];
+          if (e) m *= 1 - e / 255;
+          if (m < 1) { R[i] *= m; G[i] *= m; B[i] *= m; }
+          const a = pc[j * 4 + 3];
+          if (a) {
+            const pa = (a / 255) * v;
+            R[i] += (pc[j * 4] / 255 - R[i]) * pa;
+            G[i] += (pc[j * 4 + 1] / 255 - G[i]) * pa;
+            B[i] += (pc[j * 4 + 2] / 255 - B[i]) * pa;
+            if (pa > 0.3) lit[i] = 1;
+          }
+        }
+      }
     }
 
     // ---- trails: bright pixels smear along one direction and break into dust ----
@@ -473,7 +545,10 @@ export class Engine {
 
     const idx = this.idx;
     // Outside the picture (letterbox, transparent PNG) is always backdrop.
-    if (P.wind <= 0) for (let i = 0, j = 3; i < n; i++, j += 4) if (d[j] < 96) idx[i] = 0;
+    if (P.wind <= 0) {
+      const lit = pt ? this.lit : null;
+      for (let i = 0, j = 3; i < n; i++, j += 4) if (d[j] < 96 && !(lit && lit[i])) idx[i] = 0;
+    }
 
     if (P.sparkle > 0) {
       const top = pal.brightest;
@@ -485,6 +560,9 @@ export class Engine {
         }
       }
     }
+
+    // ---- break apart: lit pixels fly off and come back ----
+    if (P.burst !== 'none') this.scatter(P, w, h, phase);
 
     // ---- paint ----
     const out = this.pimg.data;
@@ -499,6 +577,178 @@ export class Engine {
     }
     this.pctx.putImageData(this.pimg, 0, 0);
     return this;
+  }
+
+  /** Mirror halves or build a kaleidoscope out of the framed picture. */
+  symmetry(P, w, h) {
+    const c = this.symC || (this.symC = canvas());
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+    const x = c.getContext('2d');
+    x.clearRect(0, 0, w, h);
+    x.drawImage(this.work, 0, 0);
+    const g = this.wctx;
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const part = (cx, cy, cw, ch, fx, fy) => {
+      g.save();
+      g.beginPath();
+      g.rect(cx, cy, cw, ch);
+      g.clip();
+      g.translate(fx ? w : 0, fy ? h : 0);
+      g.scale(fx ? -1 : 1, fy ? -1 : 1);
+      g.drawImage(c, 0, 0);
+      g.restore();
+    };
+    const hw = Math.ceil(w / 2), hh = Math.ceil(h / 2);
+    if (P.sym === 'h') { part(0, 0, hw, h, false, false); part(w - hw, 0, hw, h, true, false); }
+    else if (P.sym === 'v') { part(0, 0, w, hh, false, false); part(0, h - hh, w, hh, false, true); }
+    else if (P.sym === 'quad') {
+      part(0, 0, hw, hh, false, false); part(w - hw, 0, hw, hh, true, false);
+      part(0, h - hh, hw, hh, false, true); part(w - hw, h - hh, hw, hh, true, true);
+    } else {
+      const N = Math.max(2, Math.round(P.symN));
+      const th = Math.PI / N;
+      const rad = Math.hypot(w, h);
+      const turn = (P.symTurn * Math.PI) / 180;
+      for (let i = 0; i < N * 2; i++) {
+        g.save();
+        g.translate(w / 2, h / 2);
+        g.rotate(i * th);
+        if (i % 2) { g.rotate(th); g.scale(1, -1); }
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.lineTo(rad, -0.6);
+        g.lineTo(rad * Math.cos(th + 0.012), rad * Math.sin(th + 0.012));
+        g.closePath();
+        g.clip();
+        g.rotate(-turn);
+        g.drawImage(c, -w / 2, -h / 2);
+        g.restore();
+      }
+    }
+    g.restore();
+  }
+
+  /** Words on top of the picture; they go through the same pipeline. */
+  drawText(P, w, h) {
+    const g = this.wctx;
+    let lines = String(P.text).split('\n').slice(0, 10);
+    if (P.textUpper) lines = lines.map((s) => s.toUpperCase());
+    const size = Math.max(4, P.textSize * h);
+    const fam = P.textFont === 'serif' ? '700 SIZE "New York", "Iowan Old Style", Georgia, serif'
+      : P.textFont === 'mono' ? '500 SIZE "SF Mono", ui-monospace, "Geist Mono", Menlo, monospace'
+        : '700 SIZE -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif';
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = 'source-over';
+    g.font = fam.replace('SIZE', size.toFixed(1) + 'px');
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = P.textColor;
+    const sp = P.textSpace * size;
+    const spaced = 'letterSpacing' in g;
+    if (spaced) g.letterSpacing = sp.toFixed(2) + 'px';
+    g.translate(P.textX * w, P.textY * h);
+    if (P.textRot) g.rotate((P.textRot * Math.PI) / 180);
+    const lh = size * 1.12;
+    lines.forEach((s, i) => {
+      const y = (i - (lines.length - 1) / 2) * lh;
+      // With letter spacing the browser adds a gap after the last letter too; shift it back.
+      g.fillText(s, spaced ? sp / 2 : 0, y);
+    });
+    g.restore();
+  }
+
+  /** Coverage 0..1 of the frame shape at every cell. */
+  frameMask(P, w, h) {
+    if (P.frame === 'custom' && !frameImage) return null;
+    const sig = [w, h, P.frame, P.frameSize, P.frameRound, P.frameSoft, P.frame === 'custom' ? frameVer : 0].join('|');
+    if (this.fmSig === sig) return this.fm;
+    const c = canvas(w, h);
+    const x = c.getContext('2d', { willReadFrequently: true });
+    const s = P.frameSize;
+    const m = (Math.min(w, h) / 2) * s;
+    x.fillStyle = '#fff';
+    x.translate(w / 2, h / 2);
+    x.beginPath();
+    if (P.frame === 'round') roundedPath(x, (w / 2) * s, (h / 2) * s, Math.min(w, h) * s * P.frameRound);
+    else if (P.frame === 'circle') x.ellipse(0, 0, (w / 2) * s, (h / 2) * s, 0, 0, TAU);
+    else if (P.frame === 'diamond') polygon(x, [[0, (-h / 2) * s], [(w / 2) * s, 0], [0, (h / 2) * s], [(-w / 2) * s, 0]]);
+    else if (P.frame === 'hex') polygon(x, starPoints(6, m, m * 0.866).filter((_, i) => i % 2 === 0));
+    else if (P.frame === 'star') { x.translate(0, m * 0.06); polygon(x, starPoints(5, m * 1.05, m * 0.5)); }
+    else if (P.frame === 'heart') heartPath(x, m * 1.02);
+    else if (P.frame === 'custom') {
+      const k = Math.min((w * s) / frameImage.width, (h * s) / frameImage.height);
+      x.imageSmoothingQuality = 'high';
+      x.drawImage(frameImage, (-frameImage.width * k) / 2, (-frameImage.height * k) / 2, frameImage.width * k, frameImage.height * k);
+    }
+    x.fill();
+    const d = x.getImageData(0, 0, w, h).data;
+    const n = w * h;
+    const fm = (this.fm && this.fm.length === n) ? this.fm : new Float32Array(n);
+    for (let i = 0; i < n; i++) fm[i] = d[i * 4 + 3] / 255;
+    const r = Math.round(P.frameSoft * Math.min(w, h));
+    if (r > 0) {
+      const tmp = new Float32Array(n);
+      boxBlur(fm, fm, tmp, w, h, r);
+      boxBlur(fm, fm, tmp, w, h, Math.max(1, r >> 1));
+    }
+    this.fm = fm;
+    this.fmSig = sig;
+    return fm;
+  }
+
+  /** Move lit cells away from their places at the start and/or end of the loop. */
+  scatter(P, w, h, phase) {
+    const len = Math.max(0.02, P.burstLen);
+    const tin = P.burstWhen === 'end' ? 9 : phase / len;
+    const tout = P.burstWhen === 'start' ? 9 : (1 - phase) / len;
+    const away = 1 - clamp(Math.min(tin, tout));
+    if (away <= 0) return;
+    const src = this.idx2, out = this.idx;
+    src.set(out);
+    out.fill(0);
+    const st = P.burstStagger * 1.5;
+    const reach = P.burstDist * Math.max(w, h);
+    const cx = w / 2, cy = h / 2;
+    const mode = P.burst;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = src[y * w + x];
+        if (!v) continue;
+        const h1 = hash(x, y, 7), h2 = hash(x, y, 13), h3 = hash(x, y, 29);
+        let b = away * (1 + st) - h1 * st;
+        if (b <= 0) { out[y * w + x] = v; continue; }
+        if (b > 1) b = 1;
+        // Some pixels burn out on the way, so the cloud thins as it spreads.
+        if (h3 < b * b * 0.9) continue;
+        const e = b * b;
+        let nx = x, ny = y;
+        if (mode === 'explode') {
+          const a = Math.atan2(y - cy, x - cx) + (h2 - 0.5) * 0.9;
+          const dist = reach * e * (0.35 + 0.65 * h3);
+          nx = x + Math.cos(a) * dist; ny = y + Math.sin(a) * dist;
+        } else if (mode === 'scatter') {
+          const a = h2 * TAU;
+          const dist = reach * 0.6 * e * (0.3 + 0.7 * h3);
+          nx = x + Math.cos(a) * dist; ny = y + Math.sin(a) * dist;
+        } else if (mode === 'fall' || mode === 'rise') {
+          const dy = reach * e * (0.5 + 0.5 * h3);
+          nx = x + (h2 - 0.5) * reach * 0.25 * b; ny = mode === 'fall' ? y + dy : y - dy;
+        } else if (mode === 'blow') {
+          nx = x + reach * 1.2 * e * (0.4 + 0.6 * h3);
+          ny = y + Math.sin(b * 5 + h2 * TAU) * reach * 0.08 - reach * 0.15 * e * h2;
+        } else {
+          const a = Math.atan2(y - cy, x - cx) + e * 3.2 * (0.6 + 0.4 * h2);
+          const rr = Math.hypot(x - cx, y - cy) * (1 + e * P.burstDist * (0.6 + h3));
+          nx = cx + Math.cos(a) * rr; ny = cy + Math.sin(a) * rr;
+        }
+        nx = Math.round(nx); ny = Math.round(ny);
+        if (nx >= 0 && ny >= 0 && nx < w && ny < h) out[ny * w + nx] = v;
+      }
+    }
   }
 
   normLUT(nm) {
@@ -651,7 +901,7 @@ export class Engine {
   // ---------- finish: scale up and apply pixel shape, glow, scanlines ----------
 
   shapePattern(ctx, k, P) {
-    const key = P.shape + ':' + k + ':' + P.gap.toFixed(3) + ':' + P.shapeRot;
+    const key = P.shape + ':' + k + ':' + P.gap.toFixed(3) + ':' + P.shapeRot + (P.shape === 'custom' ? ':' + customVer : '');
     let c = this.patterns.get(key);
     if (!c) {
       c = canvas(k, k);
@@ -665,15 +915,19 @@ export class Engine {
   /** Coverage (0..255) of one shape inside a k x k cell. */
   shapeTile(shape, k, P, scale) {
     const s = Math.round(scale * 20) / 20;
-    const key = shape + ':' + k + ':' + P.gap.toFixed(3) + ':' + P.shapeRot + ':' + s;
+    const own = shape === 'custom' && !P.customTint && customShape;
+    const key = shape + ':' + k + ':' + P.gap.toFixed(3) + ':' + P.shapeRot + ':' + s + (shape === 'custom' ? ':' + customVer + (own ? 'c' : '') : '');
     let t = this.tiles.get(key);
     if (!t) {
       const c = canvas(k, k);
       const x = c.getContext('2d', { willReadFrequently: true });
       paintShape(x, shape, k, P.gap, P.shapeRot, s);
-      const d = x.getImageData(0, 0, k, k).data;
+      const img = x.getImageData(0, 0, k, k);
+      const d = img.data;
       t = new Uint8Array(k * k);
       for (let i = 0; i < t.length; i++) t[i] = d[i * 4 + 3];
+      // A custom pixel that keeps its own colours carries them along.
+      if (own) t.rgba = new Uint32Array(d.buffer.slice(0));
       if (this.tiles.size > 300) this.tiles.clear();
       this.tiles.set(key, t);
     }
@@ -684,8 +938,8 @@ export class Engine {
    * Draw every lit cell with its own shape: one shape per palette colour, shapes
    * scattered at random, or sizes that follow the colour's brightness.
    */
-  paintCells(lx, k, pad, P) {
-    const { w, h, idx } = this;
+  /** Which shape and what size every palette colour gets. Used by the painter and the SVG export. */
+  shapePlan(P) {
     const pal = this.palette(P);
     const n = pal.n;
     const set = shapeSet(P);
@@ -701,16 +955,26 @@ export class Engine {
         if (lum[i] < lo) lo = lum[i];
         if (lum[i] > hi) hi = lum[i];
       }
-      if (hi > lo) for (let i = 1; i < n; i++) scale[i] = 1 - P.shapeVar * 0.72 * (1 - (lum[i] - lo) / (hi - lo));
+      if (hi > lo) for (let i = 1; i < n; i++) scale[i] = Math.round((1 - P.shapeVar * 0.72 * (1 - (lum[i] - lo) / (hi - lo))) * 20) / 20;
     }
+    const shapes = new Array(n * slots);
+    for (let i = 1; i < n; i++) {
+      for (let j = 0; j < slots; j++) shapes[i * slots + j] = random ? set[j] : byColour ? set[(i - 1) % set.length] : P.shape;
+    }
+    return { pal, n, slots, random, shapes, scale };
+  }
+
+  /** The slot (which of the scattered shapes) of the cell at x, y. */
+  static slotOf(x, y, slots) { return (hash(x, y, 91) * slots) | 0; }
+
+  paintCells(lx, k, pad, P) {
+    const { w, h, idx } = this;
+    const { pal, n, slots, random, shapes, scale } = this.shapePlan(P);
     const tiles = new Array(n * slots);
     const rgb = new Uint32Array(n);
     for (let i = 1; i < n; i++) {
       rgb[i] = (pal.u8[i * 3 + 2] << 16) | (pal.u8[i * 3 + 1] << 8) | pal.u8[i * 3];
-      for (let j = 0; j < slots; j++) {
-        const shape = random ? set[j] : byColour ? set[(i - 1) % set.length] : P.shape;
-        tiles[i * slots + j] = this.shapeTile(shape, k, P, scale[i]);
-      }
+      for (let j = 0; j < slots; j++) tiles[i * slots + j] = this.shapeTile(shapes[i * slots + j], k, P, scale[i]);
     }
     const W = w * k, H = h * k;
     if (!this.cimg || this.cimg.width !== W || this.cimg.height !== H) {
@@ -723,13 +987,13 @@ export class Engine {
       for (let x = 0; x < w; x++) {
         const v = idx[y * w + x];
         if (!v) continue;
-        const T = tiles[v * slots + (random ? (hash(x, y, 91) * slots) | 0 : 0)];
+        const T = tiles[v * slots + (random ? Engine.slotOf(x, y, slots) : 0)];
         const col = rgb[v];
         let row = y * k * W + x * k;
         for (let ty = 0, q = 0; ty < k; ty++, row += W) {
           for (let tx = 0; tx < k; tx++, q++) {
             const a = T[q];
-            if (a) o[row + tx] = (a << 24) | col;
+            if (a) o[row + tx] = T.rgba ? T.rgba[q] : (a << 24) | col;
           }
         }
       }
@@ -755,7 +1019,8 @@ export class Engine {
     lx.clearRect(0, 0, W, H);
     lx.imageSmoothingEnabled = false;
     const shaped = k >= 3 && isShaped(P);
-    if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0)) this.paintCells(lx, k, pad, P);
+    const ownColours = !P.customTint && customShape && (P.shapeMix === 'none' ? P.shape === 'custom' : shapeSet(P).includes('custom'));
+    if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0 || ownColours)) this.paintCells(lx, k, pad, P);
     else {
       lx.drawImage(this.pix, pad * k, pad * k, this.w * k, this.h * k);
       if (shaped) {
