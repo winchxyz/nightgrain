@@ -13,7 +13,7 @@ const signed = (d) => (v) => (v > 0 ? '+' : '') + (+v).toFixed(d);
  */
 export const CONTROLS = [
   // ---- Source: framing ----
-  { tab: 'source', group: 'Frame', k: 'aspect', type: 'chips', label: 'Shape', def: 'source', keep: true,
+  { tab: 'source', group: 'Frame', k: 'aspect', type: 'chips', label: 'Format', def: 'source', keep: true,
     options: [['source', 'Original'], ['1:1', '1:1'], ['4:5', '4:5'], ['3:4', '3:4'], ['9:16', '9:16'], ['16:9', '16:9'], ['3:2', '3:2']],
     hint: 'The shape of the finished picture.' },
   { tab: 'source', group: 'Frame', k: 'fit', type: 'chips', label: 'Fit', def: 'cover', keep: true,
@@ -104,11 +104,45 @@ export const CONTROLS = [
   { tab: 'motion', group: 'Entrance', k: 'introLen', type: 'range', label: 'Takes', min: 0.05, max: 0.5, step: 0.01, def: 0.3, fmt: (v) => pct(v) + ' of loop', show: (P) => P.intro !== 'none', hint: 'How much of the loop the entrance takes.' },
   { tab: 'motion', group: 'Entrance', k: 'outro', type: 'toggle', label: 'Leave the same way', def: true, show: (P) => P.intro !== 'none', hint: 'The picture disappears at the end, so the loop closes cleanly.' },
 
+  // ---- Colour (the palette itself is built by hand in main.js) ----
+  { tab: 'colour', group: 'Adjust all colours', k: 'palHue', type: 'range', label: 'Hue', min: -180, max: 180, step: 1, def: 0, fmt: (v) => signed(0)(v) + '°',
+    hint: 'Turn every palette colour around the colour wheel at once. The backdrop stays as it is.' },
+  { tab: 'colour', group: 'Adjust all colours', k: 'palSat', type: 'range', label: 'Vividness', min: 0, max: 2, step: 0.01, def: 1, fmt: num(2),
+    hint: 'Make every palette colour more vivid, or wash them out toward grey.' },
+  { tab: 'colour', group: 'Adjust all colours', k: 'palLight', type: 'range', label: 'Lightness', min: -0.5, max: 0.5, step: 0.01, def: 0, fmt: signed(2),
+    hint: 'Make every palette colour lighter or darker.' },
+
+  { tab: 'colour', group: 'Tint the picture', k: 'tint', type: 'chips', label: 'Tint', def: 'none',
+    options: [['none', 'Off'], ['solid', 'One colour'], ['linear', 'Gradient'], ['radial', 'From the centre'], ['tone', 'By brightness'], ['rainbow', 'Rainbow']],
+    hint: 'Colour the picture before it is dithered, so different palette colours light up in different places.' },
+  { tab: 'colour', group: 'Tint the picture', k: 'tintA', type: 'color', label: 'Tint colour', def: '#2573ed', show: (P) => P.tint !== 'none' && P.tint !== 'rainbow',
+    hint: 'The tint. In a gradient this is where it starts; by brightness this is the colour of the dark parts.' },
+  { tab: 'colour', group: 'Tint the picture', k: 'tintB', type: 'color', label: 'Second colour', def: '#f8932e', show: (P) => ['linear', 'radial', 'tone'].includes(P.tint),
+    hint: 'Where the gradient ends; by brightness this is the colour of the bright parts.' },
+  { tab: 'colour', group: 'Tint the picture', k: 'tintAmt', type: 'range', label: 'Strength', min: 0, max: 1, step: 0.01, def: 0.85, fmt: pct, show: (P) => P.tint !== 'none',
+    hint: 'How much of the picture\'s own colour the tint replaces.' },
+  { tab: 'colour', group: 'Tint the picture', k: 'tintAngle', type: 'range', label: 'Direction', min: -180, max: 180, step: 1, def: 90, fmt: (v) => Math.round(v) + '°', show: (P) => P.tint === 'linear' || P.tint === 'rainbow',
+    hint: 'Which way the colours run across the picture. 90° is top to bottom.' },
+  { tab: 'colour', group: 'Tint the picture', k: 'tintMove', type: 'range', label: 'Flow', min: -3, max: 3, step: 1, def: 0, fmt: signed(0), show: (P) => P.tint !== 'none' && P.tint !== 'solid',
+    hint: 'The colours travel through the picture this many times per loop.' },
+
+  // ---- Shape ----
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeMix', type: 'chips', label: 'Use', def: 'none',
+    options: [['none', 'One shape'], ['colour', 'One per colour'], ['random', 'Scattered']],
+    hint: 'One shape for every pixel, a different shape for each palette colour, or several shapes scattered at random.' },
+  { tab: 'shape', group: 'Pixel shape', k: 'shape', type: 'shape', label: 'Shape', def: 'square', also: ['shapeMix', 'shapeSet'],
+    hint: 'What each pixel looks like up close. With several shapes in use, click to add or remove one.' },
+  { k: 'shapeSet', type: 'hidden', def: 'dot,diamond,plus,spark' },
+  { tab: 'shape', group: 'Pixel shape', k: 'gap', type: 'range', label: 'Spacing', min: 0.05, max: 0.6, step: 0.01, def: 0.18, fmt: pct, show: (P) => P.shape !== 'square' || P.shapeMix !== 'none',
+    hint: 'The space between pixels. More spacing makes each shape smaller.' },
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeRot', type: 'range', label: 'Turn', min: 0, max: 345, step: 15, def: 0, fmt: (v) => Math.round(v) + '°', show: (P) => P.shape !== 'square' || P.shapeMix !== 'none',
+    hint: 'Turn every shape. Try it with triangles, hearts and arrows.' },
+  { tab: 'shape', group: 'Pixel shape', k: 'shapeVar', type: 'range', label: 'Size follows brightness', min: 0, max: 1, step: 0.01, def: 0, fmt: pct,
+    hint: 'Darker palette colours get smaller pixels and brighter ones stay large, which adds depth.' },
+  { tab: 'shape', group: 'Pixel size', id: 'grid2', k: 'grid', type: 'range', label: 'Resolution', min: 32, max: 640, step: 1, def: 256, fmt: (v) => Math.round(v) + ' px',
+    hint: 'Shapes need room. Fewer pixels across the picture means bigger ones, and shapes you can actually see.' },
+
   // ---- Finish ----
-  { tab: 'finish', group: 'Pixel shape', k: 'shape', type: 'chips', label: 'Shape', def: 'square',
-    options: [['square', 'Square'], ['gap', 'Tiles'], ['dot', 'Dots'], ['diamond', 'Diamonds'], ['rows', 'Rows'], ['cols', 'Columns']],
-    hint: 'What each pixel looks like up close.' },
-  { tab: 'finish', group: 'Pixel shape', k: 'gap', type: 'range', label: 'Gap', min: 0.05, max: 0.6, step: 0.01, def: 0.18, fmt: pct, show: (P) => P.shape !== 'square', hint: 'The space between pixels.' },
   { tab: 'finish', group: 'Screen', k: 'glow', type: 'range', label: 'Glow', min: 0, max: 1.5, step: 0.01, def: 0, fmt: num(2), hint: 'Lit pixels bleed light into the dark around them.' },
   { tab: 'finish', group: 'Screen', k: 'glowSize', type: 'range', label: 'Glow reach', min: 0.3, max: 4, step: 0.05, def: 1, fmt: num(2), show: (P) => P.glow > 0, hint: 'How far the glow spreads.' },
   { tab: 'finish', group: 'Screen', k: 'scan', type: 'range', label: 'Scanlines', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Dark lines between rows, like an old monitor.' },
@@ -135,6 +169,7 @@ export const TABS = [
   { id: 'tone', name: 'Tone' },
   { id: 'dither', name: 'Dither' },
   { id: 'colour', name: 'Colour' },
+  { id: 'shape', name: 'Shape' },
   { id: 'motion', name: 'Motion' },
   { id: 'finish', name: 'Finish' },
   { id: 'export', name: 'Export' },
@@ -172,6 +207,9 @@ export const LOOKS = [
   { id: 'pocket', name: 'Pocket', p: { pal: pal('gameboy'), algo: 'bayer4', mode: 'ramp', grid: 160, black: 0, gamma: 1, shimmer: 0, edge: 0.15 } },
   { id: 'riso', name: 'Riso print', p: { pal: pal('riso'), algo: 'cluster', grid: 240, black: 0, gamma: 1, contrast: 0.1, shimmer: 0.1, edge: 0, pscale: 1 } },
   { id: 'halo', name: 'Halo', p: { pal: pal('aurora'), algo: 'bayer8', grid: 200, edge: 1.6, edgeFill: 0.25, glow: 0.6, shimmer: 0.45, intro: 'radial', introLen: 0.25 } },
+  { id: 'prism', name: 'Prism', p: { pal: pal('primaries'), algo: 'blue', grid: 240, tint: 'rainbow', tintAngle: 60, tintMove: 1, tintAmt: 0.9, shimmer: 0.3, edge: 0.5 } },
+  { id: 'confetti', name: 'Confetti', p: { pal: pal('rosewindow'), algo: 'bayer4', grid: 72, shapeMix: 'random', shapeSet: 'dot,tri,plus,diamond,star', gap: 0.12, sat: 1.6, shimmer: 0.25, edge: 0.4 } },
+  { id: 'starlight', name: 'Starlight', p: { pal: pal('frost'), algo: 'blue', mode: 'ramp', grid: 88, shape: 'spark', shapeVar: 0.8, gap: 0.08, glow: 0.6, glowSize: 0.8, shimmer: 0.4, sparkle: 0.2 } },
 ];
 
 export { PALETTES, ALGOS, isDiff };

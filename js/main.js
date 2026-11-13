@@ -1,7 +1,7 @@
 // Nightgrain: app shell. Wires the engine to the stage, the panel and the exports.
 
 import { clamp, el, debounce, downloadBlob, store, hslToHex, sleep } from './util.js';
-import { Engine, drawFrame, analyse } from './engine.js';
+import { Engine, drawFrame, analyse, SHAPES, paintShape, isShaped, shapeSet, livePalette } from './engine.js';
 import { CONTROLS, CONTROL, TABS, LOOKS, KEEP, defaults, PALETTES, ALGOS } from './schema.js';
 import { extractPalette, sortByLuma } from './palettes.js';
 import { loadFile, sampleSource, SAMPLES } from './sources.js';
@@ -102,8 +102,15 @@ function setP(k, v, { silent = false } = {}) {
   if (!KEEP.has(k)) lookId = lookId && lookId.startsWith('~') ? lookId : '~' + (lookId || '');
   dirty = true;
   if (k === 'invert' && src) { const L = loopLen(); renorm(src.frame(srcTime(t), L > 0 ? (t / L) % 1 : 0)); }
+  // A tint changes the picture's colours, which only shows when colour comes from the source.
+  if (k === 'tint' && v !== 'none' && P.mode === 'ramp') {
+    P.mode = 'match';
+    updateControls('mode');
+    toast('Switched “Colour from” to Source colours so the tint shows');
+  }
   if (!silent) {
-    if (ui[k]) ui[k].update();
+    updateControls(k);
+    if (k === 'palHue' || k === 'palSat' || k === 'palLight') renderSwatches();
     refreshVisibility();
     if (KEEP.has(k) || k === 'invert') thumbsSoon();
     updateExportInfo();
@@ -145,7 +152,21 @@ function surprise() {
   P.rate = Math.round(r(6, 16));
   if (chance(0.3)) P.hue = Math.round(r(-60, 60));
   if (chance(0.35)) { P.glow = r(0.3, 0.9); P.glowSize = r(0.7, 1.8); }
-  if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows']); P.grid = Math.min(P.grid, 160); }
+  if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows', 'round']); P.grid = Math.min(P.grid, 160); }
+  else if (chance(0.15)) {
+    P.grid = pick([56, 64, 72, 88]);
+    P.gap = r(0.06, 0.2);
+    if (chance(0.5)) { P.shapeMix = pick(['colour', 'random']); P.shapeSet = pick(['dot,diamond,plus,spark', 'dot,ring,round', 'tri,diamond,hex', 'star,spark,dot', 'heart,dot']); }
+    else P.shape = pick(['plus', 'cross', 'star', 'spark', 'heart', 'tri', 'hex', 'ring', 'moon', 'slash']);
+    if (chance(0.5)) P.shapeVar = r(0.3, 0.9);
+  }
+  if (P.mode === 'match' && chance(0.2)) {
+    P.tint = pick(['linear', 'radial', 'tone', 'rainbow']);
+    P.tintA = hslToHex(Math.random() * 360, 0.85, 0.55);
+    P.tintB = hslToHex(Math.random() * 360, 0.85, 0.55);
+    P.tintAngle = Math.round(r(-180, 180));
+    if (chance(0.5)) P.tintMove = pick([-1, 1]);
+  }
   if (chance(0.2)) { P.wind = r(0.4, 0.9); P.windDir = pick(['left', 'right', 'up']); }
   if (chance(0.25)) P.sparkle = r(0.1, 0.5);
   if (chance(0.25)) P.glint = r(0.3, 0.8);
@@ -158,7 +179,14 @@ function surprise() {
 }
 
 // ---------- panel building ----------
+// ui is keyed by control id (the setting's key, unless a setting appears twice).
 const ui = {};
+function updateControls(k) {
+  for (const id in ui) {
+    const c = ui[id].def;
+    if (c.k === k || (c.also && c.also.includes(k))) ui[id].update();
+  }
+}
 const groups = [];
 const tabEls = {};
 
@@ -170,6 +198,7 @@ const ICONS = {
   colour: '<path d="M12 3.500c3 3.600 5.500 6.400 5.500 9.500a5.500 5.500 0 0 1-11 0c0-3.100 2.500-5.900 5.500-9.500z"/>',
   motion: '<path d="M3 12c2.500-5.500 4.500-5.500 6 0s3.500 5.500 6 0 3.500-5.500 6 0"/>',
   finish: '<path d="M12 4l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16l8 4 8-4"/>',
+  shape: '<rect x="4" y="4" width="6.500" height="6.500" rx="1"/><circle cx="16.700" cy="7.200" r="3.300"/><path d="M7.200 13.500l3.500 6.200h-7z"/><path d="M16.700 13.300l3.500 3.500-3.500 3.500-3.500-3.500z"/>',
   export: '<path d="M12 4v11"/><path d="M7.500 10.500L12 15l4.500-4.500"/><path d="M5 19.500h14"/>',
 };
 
@@ -194,6 +223,7 @@ function pctOf(c, v) { return ((v - c.min) / (c.max - c.min)) * 100 + '%'; }
 
 function buildControl(c) {
   let root;
+  const id = c.id || c.k;
   const same = (a, b) => String(a) === String(b);
   if (c.type === 'range') {
     const out = el('output');
@@ -202,7 +232,7 @@ function buildControl(c) {
     root = el('div.ctl', null, head, input);
     input.addEventListener('input', () => setP(c.k, +input.value));
     head.addEventListener('dblclick', () => setP(c.k, c.def));
-    ui[c.k] = {
+    ui[id] = {
       root,
       update() {
         input.value = P[c.k];
@@ -228,11 +258,11 @@ function buildControl(c) {
       }
     } else for (const [value, label] of c.options) add(value, label);
     root = el('div.ctl', null, el('div.ctl-head', null, el('label', { text: c.label })), box);
-    ui[c.k] = { root, update() { for (const b of btns) b.classList.toggle('on', same(b._v, P[c.k])); } };
+    ui[id] = { root, update() { for (const b of btns) b.classList.toggle('on', same(b._v, P[c.k])); } };
   } else if (c.type === 'toggle') {
     const sw = el('button.switch', { type: 'button', role: 'switch', 'aria-label': c.label, onclick: () => setP(c.k, !P[c.k]) });
     root = el('div.ctl', null, el('div.ctl-row', null, el('label', { text: c.label }), sw));
-    ui[c.k] = { root, update() { sw.setAttribute('aria-checked', P[c.k] ? 'true' : 'false'); } };
+    ui[id] = { root, update() { sw.setAttribute('aria-checked', P[c.k] ? 'true' : 'false'); } };
   } else if (c.type === 'color') {
     const input = el('input', { type: 'color', 'aria-label': c.label });
     const hex = el('span.mono.muted');
@@ -240,13 +270,45 @@ function buildControl(c) {
     const row = el('div.color-row', null, input, hex);
     if (c.pick) row.append(el('span.grow'), el('button.btn.small', { type: 'button', text: 'Pick from picture', onclick: () => startPicking() }));
     root = el('div.ctl', null, el('div.ctl-head', null, el('label', { text: c.label })), row);
-    ui[c.k] = { root, update() { input.value = P[c.k]; hex.textContent = P[c.k]; } };
+    ui[id] = { root, update() { input.value = P[c.k]; hex.textContent = P[c.k]; } };
+  } else if (c.type === 'shape') {
+    // A grid of drawn shapes. One is picked, or several when shapes are mixed.
+    const box = el('div.shape-grid');
+    const label = el('label', { text: c.label });
+    const btns = [];
+    const dpr = Math.min(3, Math.ceil(window.devicePixelRatio || 1));
+    for (const [sid, sname] of SHAPES) {
+      const cv = el('canvas', { width: 22 * dpr, height: 22 * dpr });
+      paintShape(cv.getContext('2d'), sid, 22 * dpr, 0.2, 0, 1);
+      const b = el('button.shape-btn', { type: 'button', title: sname, 'aria-label': sname, onclick: () => pickShape(sid) }, cv);
+      b._v = sid;
+      btns.push(b);
+      box.append(b);
+    }
+    root = el('div.ctl', null, el('div.ctl-head', null, label), box);
+    ui[id] = {
+      root,
+      update() {
+        const many = P.shapeMix !== 'none';
+        const set = many ? shapeSet(P) : [P.shape];
+        label.textContent = many ? 'Shapes in use' : 'Shape';
+        for (const b of btns) b.classList.toggle('on', set.includes(b._v));
+      },
+    };
   }
   root.dataset.hint = c.hint || '';
-  ui[c.k].def = c;
+  ui[id].def = c;
   return root;
 }
 
+function pickShape(sid) {
+  if (P.shapeMix === 'none') { setP('shape', sid); return; }
+  const set = shapeSet(P);
+  const next = set.includes(sid) ? set.filter((x) => x !== sid) : [...set, sid];
+  if (next.length) setP('shapeSet', next.join(','));
+}
+
+let shapeNote;
 function buildPanel() {
   for (const tab of TABS) {
     const node = el('div.tab', { 'data-tab': tab.id });
@@ -255,9 +317,13 @@ function buildPanel() {
     if (tab.id === 'looks') buildLooksTab(node);
     if (tab.id === 'source') buildSourceHead(node);
     if (tab.id === 'colour') buildColourTab(node);
+    if (tab.id === 'shape') {
+      shapeNote = el('p.note.warn', { hidden: true, text: 'The pixels are too small on screen to show a shape. Lower the resolution below.' });
+      node.append(shapeNote);
+    }
     let group = null, name = '';
     for (const c of CONTROLS) {
-      if (c.tab !== tab.id) continue;
+      if (c.tab !== tab.id || c.type === 'hidden') continue;
       if (c.group !== name) {
         name = c.group;
         group = el('section.group', null, el('h3', { text: name }));
@@ -266,8 +332,9 @@ function buildPanel() {
         node.append(group);
       }
       group.append(buildControl(c));
-      group._ctls.push(c.k);
+      group._ctls.push(c.id || c.k);
     }
+    if (tab.id === 'colour') buildColourFoot(node);
     if (tab.id === 'source') buildSourceFoot(node);
     if (tab.id === 'export') buildExportTab(node);
   }
@@ -365,11 +432,13 @@ function renderThumbs() {
   for (const k of KEEP) keep[k] = P[k];
   const base = defaults();
   for (const { look, cv } of lookCards) {
-    const shaped = look.p.shape && look.p.shape !== 'square';
-    const lp = Object.assign({}, base, keep, look.p, { grid: shaped ? 56 : 96, aspect: '1:1', pad: 0, intro: 'none' });
+    const lp = Object.assign({}, base, keep, look.p, { aspect: '1:1', pad: 0, intro: 'none' });
+    const shaped = isShaped(lp);
+    const fine = shaped && (lp.shapeMix !== 'none' || !['gap', 'dot', 'diamond', 'rows', 'cols', 'round'].includes(lp.shape));
+    lp.grid = fine ? 28 : shaped ? 56 : 96;
     lp.pal = look.p.pal || base.pal;
     thumbEngine.render(lp, drawable, src.w, src.h, t, L);
-    thumbEngine.compose(cv, shaped ? 4 : 2, lp);
+    thumbEngine.compose(cv, fine ? 8 : shaped ? 4 : 2, lp);
   }
 }
 const thumbsSoon = debounce(renderThumbs, 250);
@@ -417,6 +486,10 @@ function buildColourTab(node) {
   const fp = el('div.ctl', null, el('div.ctl-head', null, el('label', { text: 'Take colours from the picture' })), counts);
   fp.dataset.hint = 'Build a palette out of the picture\'s own colours. Pick how many.';
   g1.append(fp);
+  node.append(g1);
+}
+
+function buildColourFoot(node) {
   palList = el('div.pal-list');
   for (const p of PALETTES) {
     const strip = el('span.strip');
@@ -425,7 +498,7 @@ function buildColourTab(node) {
     b._id = p.id;
     palList.append(b);
   }
-  node.append(g1, el('section.group', null, el('h3', { text: 'Ready-made' }), palList));
+  node.append(el('section.group', null, el('h3', { text: 'Ready-made palettes' }), palList));
 }
 
 function setPal(colors) {
@@ -441,10 +514,17 @@ function setPal(colors) {
 function renderSwatches() {
   if (!swatchBox) return;
   swatchBox.textContent = '';
-  P.pal.forEach((c, i) => {
+  // Swatches show the colours as drawn, with the "adjust all" sliders applied.
+  livePalette(P).forEach((c, i) => {
     const input = el('input', { type: 'color', value: c, 'aria-label': i === 0 ? 'Backdrop colour' : 'Colour ' + i });
     const sw = el('div.swatch' + (i === 0 ? '.bg' : ''), { style: { background: c }, 'data-hint': i === 0 ? 'The backdrop. Everything dark falls into this colour.' : 'Click to change this colour.' }, input);
     input.addEventListener('input', () => {
+      if (P.palHue || P.palSat !== 1 || P.palLight) {
+        // Editing one colour by hand: make the adjusted colours the real palette first.
+        P.pal = [...livePalette(P)];
+        P.palHue = 0; P.palSat = 1; P.palLight = 0;
+        for (const k of ['palHue', 'palSat', 'palLight']) updateControls(k);
+      }
       P.pal[i] = input.value;
       sw.style.background = input.value;
       if (lookId && !lookId.startsWith('~')) lookId = '~' + lookId;
@@ -710,6 +790,7 @@ function draw() {
   } else {
     engine.compose(view, k, P, { transparent: P.transparent });
   }
+  if (shapeNote) shapeNote.hidden = !(k < 3 && isShaped(P));
   view.classList.toggle('checker', P.transparent && !compare);
   view.style.imageRendering = view.width / dpr > aw / dpr + 1 || view.height / dpr > ah / dpr + 1 ? 'auto' : 'pixelated';
   const cw = view.width / dpr, ch = view.height / dpr;
@@ -739,7 +820,7 @@ function frame(now) {
     t = (t + dt) % L;
   } else if (t >= L) t = 0;
 
-  const timeLive = src.animated || P.pulse > 0 || P.glint > 0 || P.intro !== 'none';
+  const timeLive = src.animated || P.pulse > 0 || P.glint > 0 || P.intro !== 'none' || (P.tint !== 'none' && P.tint !== 'solid' && P.tintMove !== 0);
   const sig = Math.floor(t * P.rate + 1e-6) + '|' + (timeLive ? Math.round(t * 40) : 0) + '|' + viewport.clientWidth + 'x' + viewport.clientHeight;
   if (!dirty && sig === lastSig) return;
   lastSig = sig;

@@ -49,6 +49,22 @@ export function hslToHex(h, s, l) {
   return rgbToHex(f(0) * 255, f(8) * 255, f(4) * 255);
 }
 
+export function hexToHsl(hex) {
+  const [R, G, B] = hexToRgb(hex);
+  const r = R / 255, g = G / 255, b = B / 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (d < 1e-4) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, Math.min(1, s), l];
+}
+
+// Turn the hue by dh degrees, scale saturation by ks, shift lightness by dl.
+export function adjustHex(hex, dh, ks, dl) {
+  const [h, s, l] = hexToHsl(hex);
+  return hslToHex(h + dh, clamp(s * ks), clamp(l + dl));
+}
+
 // el('div.cls', {attrs}, ...children)
 export function el(spec, attrs, ...kids) {
   const [tag, ...cls] = spec.split('.');

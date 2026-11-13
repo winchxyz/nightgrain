@@ -2,6 +2,7 @@
 
 import { GifWriter, buildPalette, paletteMapper } from './gif.js';
 import { hexToRgb, sleep } from './util.js';
+import { isShaped, livePalette } from './engine.js';
 
 const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/+esm';
 
@@ -12,7 +13,7 @@ export function exportScale(P, engine) {
 }
 
 // True when the finished picture contains only palette colours.
-const isPure = (P, k) => (P.shape === 'square' || k < 3) && P.glow <= 0 && (P.scan <= 0 || k < 2) && P.aberr <= 0;
+const isPure = (P, k) => (!isShaped(P) || k < 3) && P.glow <= 0 && (P.scan <= 0 || k < 2) && P.aberr <= 0;
 
 const toBlob = (canvas, type, q) => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the image.'))), type, q));
 
@@ -62,7 +63,7 @@ export async function exportGIF(app, onProgress, signal) {
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   let writer, mapper;
-  const palBytes = new Uint8Array(P.pal.slice(0, 256).flatMap((c) => hexToRgb(c)));
+  const palBytes = new Uint8Array(livePalette(P).slice(0, 256).flatMap((c) => hexToRgb(c)));
 
   if (pure) {
     writer = new GifWriter(W, H, palBytes);
@@ -77,7 +78,7 @@ export async function exportGIF(app, onProgress, signal) {
       onProgress(0.1 * ((i + 1) / picks), 'Reading colours');
       if (signal.cancelled) return null;
     }
-    const fixed = P.pal.slice(0, 48).map((c) => hexToRgb(c));
+    const fixed = livePalette(P).slice(0, 48).map((c) => hexToRgb(c));
     const table = buildPalette(samples, 256, fixed);
     writer = new GifWriter(W, H, table);
     mapper = paletteMapper(table);
