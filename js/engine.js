@@ -572,6 +572,9 @@ export class Engine {
     // ---- trails: bright pixels smear along one direction and break into dust ----
     if (P.wind > 0) this.trails(P, w, h);
 
+    // ---- touch: the pointer bends and lights the picture (live view only) ----
+    if (this.touch && this.touchOn && P.touch !== 'off') this.touch.apply(this, P);
+
     const lv = this.lv;
     for (let i = 0; i < n; i++) {
       const l = 0.299 * R[i] + 0.587 * G[i] + 0.114 * B[i];
@@ -1358,6 +1361,10 @@ export class Engine {
       }
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
+    }
+    if (this.touch && this.touchOn && P.touch === 'glow') {
+      const u8 = this.palette(P).u8, b = this.pal.brightest * 3;
+      this.touch.paintLight(ctx, pad * k, pad * k, this.w * k, this.h * k, [u8[b], u8[b + 1], u8[b + 2]], P);
     }
     if (P.bloom > 0 || P.streak > 0) this.highlights(ctx, k, pad, P);
     if (P.ring > 0) this.lensRing(ctx, W, H, P);

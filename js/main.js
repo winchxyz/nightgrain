@@ -10,6 +10,7 @@ import { exportAPNG, exportSheet, exportSticker, exportSVG, exportText, zipStore
 import { charsOn, forgetInk } from './chars.js';
 import { keyAt, setKey, removeKey, valueAt, cleanKeys } from './keys.js';
 import { Painter } from './paint.js';
+import { Touch } from './touch.js';
 
 const $ = (s) => document.querySelector(s);
 const view = $('#view');
@@ -23,6 +24,10 @@ const PAL_HEX = /^!?#[0-9a-f]{6}$/i;
 
 const P = defaults();
 const engine = new Engine();
+// The pointer's trace on the picture: light, ripples, smears.
+const touchFx = new Touch();
+engine.touch = touchFx;
+let lastTouch = 'water';
 const thumbEngine = new Engine();
 const painter = new Painter();
 engine.paint = painter.data;
@@ -121,6 +126,8 @@ const app = {
     const st = srcTime(tt);
     if (src.kind === 'video') await src.seek(st);
     app.Pe = liveP(tt);
+    // Saved files are the picture itself, without the pointer's trace.
+    engine.touchOn = false;
     engine.render(app.Pe, src.frame(st, L > 0 ? (tt / L) % 1 : 0), src.w, src.h, tt, L);
   },
 };
@@ -224,6 +231,7 @@ function setP(k, v, { silent = false } = {}) {
     for (const x of ['customTint', 'shape', 'grid']) updateControls(x);
   }
   if (k === 'text') syncStageMode();
+  if (k === 'touch') { if (v !== 'off') lastTouch = v; syncStageMode(); }
   // Characters need room to be read.
   if (k === 'chars' && v !== 'off' && P.grid > 132 && !P.keys.grid) {
     P.grid = 96;
@@ -1189,9 +1197,14 @@ function renderInk() {
 
 const paintMode = () => activeTab === 'paint' && brush.tool !== 'move';
 const textMode = () => activeTab === 'text' && !!P.text;
+const touchMode = () => P.touch !== 'off' && !paintMode() && !textMode() && !picking;
 function syncStageMode() {
   viewport.classList.toggle('painting', paintMode());
   viewport.classList.toggle('texting', textMode());
+  viewport.classList.toggle('touching', touchMode());
+  const tb = $('#btnTouch');
+  tb.classList.toggle('on', P.touch !== 'off');
+  tb.setAttribute('aria-pressed', P.touch !== 'off' ? 'true' : 'false');
   if (brushEl && !paintMode()) brushEl.hidden = true;
 }
 
@@ -1384,7 +1397,86 @@ async function pickFrame() {
   if (!ok && P.frame === 'custom' && !P.frameImg) setP('frame', 'none');
 }
 
-const ACTIONS = { pickCustom, pickFrame };
+const ACTIONS = { pickCustom, pickFrame, recordStage };
+
+// ---------- touch ----------
+function toggleTouch() {
+  if (P.touch !== 'off') { setP('touch', 'off'); return; }
+  setP('touch', lastTouch);
+  showTab('motion');
+  toast('Move the mouse or a finger over the picture. Pick the effect on the left.', 4200);
+}
+
+// Recording the stage live, pointer play included. Rendered exports leave the touch effect out.
+let stageRec = null;
+const REC_MAX = 60;
+function syncRec() {
+  const on = !!stageRec;
+  $('#recNote').hidden = !on;
+  const b = ui.touchRec && ui.touchRec.root.querySelector('button');
+  if (b) b.textContent = on ? 'Stop and save' : 'Record what I do';
+  if (!on) return;
+  const s = Math.floor((performance.now() - stageRec.t0) / 1000);
+  $('#recTime').textContent = `Recording ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  if (s >= REC_MAX) stageRec.stop();
+}
+const REC_TYPES = ['video/mp4;codecs=avc1.640028', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+function recordStage() {
+  if (stageRec) { stageRec.stop(); return; }
+  if (busy || recording || !src) return;
+  const types = window.MediaRecorder && view.captureStream ? REC_TYPES.filter((x) => MediaRecorder.isTypeSupported(x)) : [];
+  if (!types.length) { toast('This browser cannot record the picture live.', 4200); return; }
+  const S = { t0: performance.now(), stop() {} };
+  stageRec = S;
+  const timer = setInterval(syncRec, 500);
+  const finish = (blob, ext) => {
+    if (stageRec !== S) return;
+    clearInterval(timer);
+    const seconds = (performance.now() - S.t0) / 1000;
+    stageRec = null;
+    syncRec();
+    app.lastExport = { blob, ext, live: true, seconds };
+    if (!blob || !blob.size) { toast('This browser could not record the picture.', 4200); return; }
+    downloadBlob(blob, `nightgrain-live-${stamp()}.${ext}`);
+    toast(`Saved the recording · ${seconds.toFixed(1)} s`);
+  };
+  // Some browsers accept a format and then write nothing. If no data has come after a
+  // moment, the next format takes over.
+  const begin = (i) => {
+    const type = types[i];
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    const chunks = [];
+    let bytes = 0, dropped = false, stream = null, rec = null;
+    const close = () => { if (stream) for (const tr of stream.getTracks()) tr.stop(); };
+    const giveUp = () => {
+      dropped = true;
+      try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) { /* already stopped */ }
+      close();
+      if (i + 1 < types.length) { S.t0 = performance.now(); begin(i + 1); } else finish(null, ext);
+    };
+    try {
+      stream = view.captureStream(30);
+      rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 16e6 });
+    } catch (e) {
+      giveUp();
+      return;
+    }
+    const whole = () => new Blob(chunks, { type: type.split(';')[0] });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) { chunks.push(e.data); bytes += e.data.size; } };
+    rec.onstop = () => { if (!dropped) { close(); finish(whole(), ext); } };
+    const probe = setTimeout(() => { if (!bytes && !dropped && stageRec === S) giveUp(); }, 1500);
+    S.stop = () => {
+      clearTimeout(probe);
+      try { rec.stop(); } catch (e) { /* handled below */ }
+      setTimeout(() => { if (!dropped) { close(); finish(whole(), ext); } }, 2500);
+    };
+    rec.start(250);
+  };
+  begin(0);
+  syncRec();
+  toast('Recording. Play with the picture, then press Stop and save.', 3200);
+}
+
 
 // ---------- export tab ----------
 let exInfo, exBar, exStatus, exProgress, exButtons = [], exCancel;
@@ -1743,6 +1835,7 @@ function draw() {
   const drawable = src.frame(srcTime(t), phase);
   const Pe = liveP(t);
   app.Pe = Pe;
+  engine.touchOn = !compare;
   engine.render(Pe, drawable, src.w, src.h, t, L);
   paintBackdrop(drawable);
   const { k, aw, ah, dpr } = viewScale();
@@ -1792,6 +1885,7 @@ function frame(now) {
     t = (t + dt) % L;
   } else if (t >= L) t = 0;
 
+  if (touchFx.step(dt, P, engine.w, engine.h) || stageRec) dirty = true;
   const moving = hasKeys() || P.cycle !== 0 || P.burst !== 'none';
   const timeLive = src.animated || moving || P.pulse > 0 || P.glint > 0 || P.intro !== 'none' || (P.tint !== 'none' && P.tint !== 'solid' && P.tintMove !== 0);
   const sig = Math.floor(t * P.rate + 1e-6) + '|' + (timeLive ? Math.round(t * 40) : 0) + '|' + viewport.clientWidth + 'x' + viewport.clientHeight;
@@ -1877,6 +1971,8 @@ function bindStage() {
   viewport.append(brushEl);
   viewport.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !src || busy) return;
+    // Buttons that sit over the picture keep their own clicks.
+    if (e.target.closest && e.target.closest('button')) return;
     if (picking) {
       const p = stagePoint(e);
       const x = Math.floor(p.x * engine.w), y = Math.floor(p.y * engine.h);
@@ -1894,10 +1990,20 @@ function bindStage() {
       strokeTo(stroke, stagePoint(e));
       return;
     }
+    if (touchMode()) {
+      const p = stagePoint(e);
+      touchFx.press(p.x, p.y);
+      return;
+    }
     drag = { text: textMode(), x: e.clientX, y: e.clientY, px: shown('panX'), py: shown('panY'), tx: shown('textX'), ty: shown('textY') };
     viewport.classList.add('dragging');
   });
   viewport.addEventListener('pointermove', (e) => {
+    if (touchMode() && !stroke && !drag) {
+      const p = stagePoint(e);
+      touchFx.move(p.x, p.y);
+      return;
+    }
     if (e.pointerType !== 'touch' || stroke) moveBrush(e);
     if (stroke) { strokeTo(stroke, stagePoint(e)); return; }
     if (!drag) return;
@@ -1913,7 +2019,9 @@ function bindStage() {
     if (ox > 0.5) setP('panX', clamp(drag.px + ((e.clientX - drag.x) * perCss) / ox, -1, 1));
     if (oy > 0.5) setP('panY', clamp(drag.py + ((e.clientY - drag.y) * perCss) / oy, -1, 1));
   });
-  const end = () => {
+  const end = (e) => {
+    // A lifted finger is gone; a mouse is still there.
+    if (e && e.pointerType !== 'mouse') touchFx.leave();
     if (stroke) {
       stroke = null;
       painter.snapshot();
@@ -1924,7 +2032,7 @@ function bindStage() {
   };
   viewport.addEventListener('pointerup', end);
   viewport.addEventListener('pointercancel', end);
-  viewport.addEventListener('pointerleave', () => { if (!stroke) brushEl.hidden = true; });
+  viewport.addEventListener('pointerleave', () => { touchFx.leave(); if (!stroke) brushEl.hidden = true; });
   viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
     setP('zoom', clamp(Math.round(shown('zoom') * Math.exp(-e.deltaY * 0.0015) * 100) / 100, 0.4, 5));
@@ -1962,6 +2070,8 @@ function bindChrome() {
   $('#btnPlay').addEventListener('click', () => setPlaying(!playing));
   $('#btnExport').addEventListener('click', () => showTab('export'));
   $('#btnSurprise').addEventListener('click', surprise);
+  $('#btnTouch').addEventListener('click', toggleTouch);
+  $('#btnRecStop').addEventListener('click', recordStage);
   $('#btnResetTab').addEventListener('click', resetTab);
   const search = $('#search');
   search.addEventListener('input', () => runSearch(search.value));
@@ -2056,5 +2166,9 @@ window.NG = {
   surprise,
   search: runSearch,
   resetTab,
+  touch: touchFx,
+  toggleTouch,
+  recordStage,
+  recordingStage: () => !!stageRec,
   sleep,
 };

@@ -23,6 +23,7 @@ Everything runs in your browser. Your files are never uploaded.
 - **Palette order and muting.** Drag colours into a new order, and switch a single colour off without deleting it.
 - **29 ready-made looks** with live previews on your own picture, a Surprise me button, and your own saved looks.
 - **Motion.** Shimmering grain, sparkles, a glint of light that sweeps across the subject, breathing brightness, drifting patterns, and six ways for the picture to assemble itself.
+- **Touch.** The picture answers to the mouse or a finger: light that follows it, ripples on water, paint that smears, pixels that move out of the way. It happens before the dither, so the reaction is made of the same pixels. Record what you do as a video.
 - **Keyframes.** Any slider with a ◆ can change over the loop: pin a value at one moment, another value at another, and the setting glides between them. The loop closes without a seam.
 - **Break apart.** The picture bursts into loose pixels that fly outward, fall, rise, blow away or swirl, and gathers itself back.
 - **Colour cycling.** The palette turns through the colour wheel, or its colours swap places step by step, while the picture stays.
@@ -82,6 +83,8 @@ Each frame goes through one pipeline on a small pixel grid:
 3. An optional tint recolours the picture. Masks (background removal, corner fade, frame shape, entrance), the brush and eraser layers, and dust trails shape what stays lit.
 4. The dither step turns the picture into palette indices. Ordered patterns use a cached colour-mixing table (pattern dithering in the style of Thomas Knoll); diffusion spreads the error to neighbours.
 5. The grid is scaled up with hard edges and each cell is cut to its pixel shape, or drawn as a character chosen by the cell's brightness. Then glow, scanlines, bloom, streaks and the lens ring are added. Bloom is worked out in floating point at one value per cell and enlarged, so it stays smooth.
+
+The touch effects run on a small field (96 cells on the long side): a wave equation for water, a displacement field for smear and repel, a fading light map for glow. The field bends and lights the colour planes just before step 4. Saved files leave it out; the live recording captures the canvas as you play.
 
 Keyframes and colour cycling work one level up: for every frame the app builds the settings as they are at that moment and hands them to the same pipeline.
 

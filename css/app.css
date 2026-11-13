@@ -11,13 +11,13 @@
   font-display: swap;
 }
 
-/* One frosted window over the picture you are working on. Three depths of glass:
-   the window, the panels that sit on it, and the wells inside a panel. */
+/* The app fills the page. Its surface is dark glass with a soft trace of the picture you are
+   working on behind it; panels sit on that surface, and wells sit inside the panels. */
 :root {
   --text: rgba(255, 255, 255, 0.93);
   --muted: rgba(255, 255, 255, 0.58);
   --faint: rgba(255, 255, 255, 0.38);
-  --glass: rgba(21, 21, 25, 0.62);
+  --glass: rgba(17, 17, 20, 0.74);
   --card: rgba(255, 255, 255, 0.05);
   --well: rgba(0, 0, 0, 0.24);
   --raised: rgba(255, 255, 255, 0.085);
@@ -29,7 +29,6 @@
   --accent: #f8932e;
   --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   --mono: "SF Mono", ui-monospace, "Geist Mono", Menlo, monospace;
-  --r-window: 26px;
   --r-card: 20px;
   --r-well: 14px;
   --r: 11px;
@@ -55,28 +54,23 @@ button { cursor: pointer; }
 .grow { flex: 1; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* The picture itself, soft and enlarged, behind everything. */
+/* The picture itself, very soft and enlarged, colours the surface of the app. */
 .backdrop {
-  position: fixed; inset: -6%; width: 112%; height: 112%; object-fit: cover; z-index: 0; pointer-events: none;
-  filter: blur(22px) saturate(1.35) brightness(0.92);
+  position: fixed; inset: -8%; width: 116%; height: 116%; object-fit: cover; z-index: 0; pointer-events: none;
+  filter: blur(60px) saturate(1.4);
   opacity: 0; transition: opacity 0.6s;
 }
 .backdrop.ready { opacity: 1; }
 
-/* ---------- the window ---------- */
+/* ---------- the app ---------- */
 .window {
   position: relative; z-index: 1;
-  margin: 14px; height: calc(100dvh - 28px);
+  height: 100dvh;
   display: grid;
   grid-template-columns: 76px minmax(300px, 384px) minmax(0, 1fr);
   grid-template-rows: 66px minmax(0, 1fr);
   grid-template-areas: "rail top top" "rail side stage";
   background: var(--glass);
-  -webkit-backdrop-filter: blur(34px) saturate(1.25);
-  backdrop-filter: blur(34px) saturate(1.25);
-  border: 1px solid var(--line);
-  border-radius: var(--r-window);
-  box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
   overflow: hidden;
 }
 
@@ -320,6 +314,7 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
 .viewport.picking { cursor: crosshair; }
 .viewport.painting { cursor: crosshair; }
 .viewport.texting { cursor: move; }
+.viewport.touching { cursor: default; }
 .brush { position: absolute; left: 0; top: 0; border-radius: 50%; border: 1px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), inset 0 0 0 1px rgba(0, 0, 0, 0.45); pointer-events: none; z-index: 3; }
 #view { display: block; image-rendering: pixelated; border-radius: 5px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 24px 70px rgba(0, 0, 0, 0.55); }
 #view.checker { background: repeating-conic-gradient(#232327 0 25%, #18181b 0 50%) 0 0 / 16px 16px; }
@@ -329,6 +324,11 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
   border: 1px solid var(--line-strong); border-radius: 999px; font-weight: 500; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
 }
 .pick-note { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); padding: 7px 15px; }
+.rec-note { display: flex; align-items: center; gap: 10px; padding: 5px 5px 5px 14px; white-space: nowrap; z-index: 4; }
+.rec-note i { width: 9px; height: 9px; border-radius: 50%; background: #ff4d4d; animation: rec 1.2s ease-in-out infinite; }
+.rec-note span { font-variant-numeric: tabular-nums; }
+.rec-note .btn { border-radius: 999px; background: #fff; color: #101012; font-weight: 600; }
+@keyframes rec { 50% { opacity: 0.25; } }
 .drop {
   position: absolute; inset: 12px; border: 1.500px dashed rgba(255, 255, 255, 0.7); border-radius: 14px;
   background: rgba(10, 10, 12, 0.82); display: grid; place-items: center; font-size: 17px; font-weight: 600; letter-spacing: -0.02em; pointer-events: none;
@@ -347,6 +347,16 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
 .tick { position: absolute; top: 0; width: 8px; height: 8px; margin-left: -4px; padding: 0; border: 0; border-radius: 1.5px; background: var(--accent); transform: rotate(45deg); }
 .tick:hover { filter: brightness(1.25); }
 .transport .mono { white-space: nowrap; }
+/* Touch: on when the picture answers to the pointer. */
+.pill {
+  margin-left: auto; flex: none; height: 46px; padding: 0 16px 0 13px; display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line); border-radius: 23px; background: rgba(255, 255, 255, 0.07); color: var(--text); font-weight: 560; white-space: nowrap;
+  transition: background 0.14s, color 0.14s, border-color 0.14s;
+}
+.pill:hover { background: var(--hover); }
+.pill.on { background: #fff; border-color: #fff; color: #101012; }
+.pill svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.pill + .spark { margin-left: 0; }
 .spark {
   margin-left: auto; flex: none; height: 46px; padding: 0 18px 0 14px; display: inline-flex; align-items: center; gap: 8px;
   border: 2px solid transparent; border-radius: 23px; color: #fff; font-weight: 560; white-space: nowrap;
@@ -376,10 +386,8 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
 
 /* ---------- small screens: the window fills the screen and stacks ---------- */
 @media (max-width: 880px) {
-  .backdrop { filter: blur(18px) saturate(1.3) brightness(0.8); }
+  .backdrop { filter: blur(40px) saturate(1.3); }
   .window {
-    margin: 0; height: 100dvh; border: 0; border-radius: 0; box-shadow: none;
-    -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(15, 15, 18, 0.74);
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 54px 43dvh auto minmax(0, 1fr);
     grid-template-areas: "top" "stage" "rail" "side";
@@ -394,8 +402,8 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
   .stage { margin: 0 8px; border-radius: 16px; }
   .dock { padding: 0 8px 8px; gap: 8px; }
   .transport { height: 42px; padding-right: 12px; }
-  .spark { height: 42px; width: 42px; padding: 0; justify-content: center; }
-  .spark span { display: none; }
+  .spark, .pill { height: 42px; width: 42px; padding: 0; justify-content: center; }
+  .spark span, .pill span { display: none; }
   .rail { border-right: 0; flex-direction: row; }
   .mark { display: none; }
   .rail-tabs { flex-direction: row; padding: 6px 8px; overflow-x: auto; overflow-y: hidden; }
@@ -410,5 +418,5 @@ input[type="color"]::-moz-color-swatch { border: 0; border-radius: 6px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }

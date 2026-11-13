@@ -3,6 +3,7 @@
 import { ALGOS } from './dither.js';
 import { PALETTES, paletteById } from './palettes.js';
 import { CHAR_SETS } from './chars.js';
+import { TOUCH_MODES } from './touch.js';
 
 const pct = (v) => Math.round(v * 100) + '%';
 const num = (d) => (v) => (+v).toFixed(d);
@@ -111,6 +112,16 @@ export const CONTROLS = [
   { tab: 'dither', group: 'Pattern', k: 'serp', type: 'toggle', label: 'Alternate row direction', def: true, show: (P) => isDiff(P.algo), hint: 'Runs every other row backwards, which removes diagonal streaks.' },
 
   // ---- Motion ----
+  { tab: 'motion', group: 'Touch', k: 'touch', type: 'chips', label: 'The picture reacts to the pointer', options: TOUCH_MODES, def: 'off', keep: true,
+    hint: 'Move the mouse or a finger over the picture. Glow: light follows it. Water: ripples spread. Smear: the picture drags like wet paint. Repel: pixels move out of the way. While this is on, dragging plays with the picture instead of moving it.' },
+  { tab: 'motion', group: 'Touch', k: 'touchAmt', type: 'range', label: 'Strength', min: 0.2, max: 2.5, step: 0.05, def: 1, keep: true, noAnim: true, fmt: pct, show: (P) => P.touch !== 'off',
+    hint: 'How strongly the picture answers.' },
+  { tab: 'motion', group: 'Touch', k: 'touchSize', type: 'range', label: 'Size', min: 0.4, max: 3, step: 0.05, def: 1, keep: true, noAnim: true, fmt: pct, show: (P) => P.touch !== 'off',
+    hint: 'How wide the pointer reaches.' },
+  { tab: 'motion', group: 'Touch', k: 'touchLast', type: 'range', label: 'Lasts', min: 0.3, max: 4, step: 0.05, def: 1, keep: true, noAnim: true, fmt: pct, show: (P) => P.touch !== 'off',
+    hint: 'How long the trace stays after the pointer has moved on.' },
+  { tab: 'motion', group: 'Touch', id: 'touchRec', type: 'button', label: 'Record what I do', action: 'recordStage', show: (P) => P.touch !== 'off',
+    hint: 'Record the picture live while you play with it, up to a minute, and save it as a video. Saved pictures, GIFs and rendered videos do not include the touch effect; this recording does.' },
   { tab: 'motion', group: 'Grain', k: 'shimmer', type: 'range', label: 'Shimmer', min: 0, max: 1, step: 0.01, def: 0.35, fmt: pct, hint: 'The grain keeps reshuffling, so even a still picture feels alive.' },
   { tab: 'motion', group: 'Grain', k: 'rate', type: 'range', label: 'Shimmer speed', min: 1, max: 30, step: 1, def: 10, noAnim: true, fmt: (v) => Math.round(v) + ' / s', hint: 'How many times per second the grain changes.' },
   { tab: 'motion', group: 'Grain', k: 'sparkle', type: 'range', label: 'Sparkles', min: 0, max: 1, step: 0.01, def: 0, fmt: pct, hint: 'Random pixels flash in the brightest colour.' },
