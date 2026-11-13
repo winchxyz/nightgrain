@@ -3,7 +3,6 @@
 import { GifWriter, buildPalette, paletteMapper } from './gif.js';
 import { hexToRgb, sleep } from './util.js';
 import { isShaped, hasLight, livePalette } from './engine.js';
-import { charsOn } from './chars.js';
 
 const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/+esm';
 
@@ -14,7 +13,7 @@ export function exportScale(P, engine) {
 }
 
 // True when the finished picture contains only palette colours.
-const isPure = (P, k) => (!isShaped(P) || k < 3) && !charsOn(P) && !hasLight(P) && (P.scan <= 0 || k < 2) && P.aberr <= 0;
+const isPure = (P, k) => (!isShaped(P) || k < 3) && !hasLight(P) && (P.scan <= 0 || k < 2) && P.aberr <= 0;
 
 const toBlob = (canvas, type, q) => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the image.'))), type, q));
 

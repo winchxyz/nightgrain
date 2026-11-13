@@ -26,7 +26,7 @@ export const PALETTES = [
   { id: 'blueprint', name: 'Blueprint', colors: ['#0b2a6f', '#1d4fb8', '#7fb2ff', '#ffffff'] },
   { id: 'newsprint', name: 'Newsprint', colors: ['#ebe6da', '#15140f'] },
   { id: 'ansi16', name: 'ANSI 16', colors: ['#000000', '#0000aa', '#00aa00', '#00aaaa', '#aa0000', '#aa00aa', '#aa5500', '#aaaaaa', '#555555', '#5555ff', '#55ff55', '#55ffff', '#ff5555', '#ff55ff', '#ffff55', '#ffffff'] },
-  { id: 'lumen', name: 'Lumen', colors: ['#04050a', '#f6f3ff'] },
+  { id: 'lumen', name: 'Lumen', colors: ['#04050a', '#2c2a52', '#6f6ab0', '#b9b4ee', '#f6f3ff'] },
 ];
 
 export const paletteById = (id) => PALETTES.find((p) => p.id === id) || PALETTES[0];

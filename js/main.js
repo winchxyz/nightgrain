@@ -6,8 +6,7 @@ import { CONTROLS, CONTROL, TABS, LOOKS, KEEP, CAN_ANIMATE, defaults, PALETTES, 
 import { extractPalette, sortByLuma } from './palettes.js';
 import { loadFile, sampleSource, SAMPLES, cameraSource, recordClip } from './sources.js';
 import { exportPNG, exportGIF, exportMP4, exportWebM, exportScale, canMP4 } from './export.js';
-import { exportAPNG, exportSheet, exportSticker, exportSVG, exportText, zipStore } from './more-export.js';
-import { charsOn, forgetInk } from './chars.js';
+import { exportAPNG, exportSheet, exportSticker, exportSVG, zipStore } from './more-export.js';
 import { keyAt, setKey, removeKey, valueAt, cleanKeys } from './keys.js';
 import { Painter } from './paint.js';
 import { Touch } from './touch.js';
@@ -109,7 +108,7 @@ function visP() {
   return o;
 }
 
-const COLOUR_KEYS = ['glow', 'glowSize', 'scan', 'aberr', 'shapeVar', 'palHue', 'palSat', 'palLight', 'gap', 'shapeRot', 'bloom', 'bloomSize', 'bloomTint', 'streak', 'ring', 'ringSize', 'hot', 'charFade', 'charSize'];
+const COLOUR_KEYS = ['glow', 'glowSize', 'scan', 'aberr', 'shapeVar', 'palHue', 'palSat', 'palLight', 'gap', 'shapeRot', 'bloom', 'bloomSize', 'bloomTint', 'streak', 'ring', 'ringSize', 'hot'];
 
 const app = {
   P,
@@ -232,12 +231,6 @@ function setP(k, v, { silent = false } = {}) {
   }
   if (k === 'text') syncStageMode();
   if (k === 'touch') { if (v !== 'off') lastTouch = v; syncStageMode(); }
-  // Characters need room to be read.
-  if (k === 'chars' && v !== 'off' && P.grid > 132 && !P.keys.grid) {
-    P.grid = 96;
-    updateControls('grid');
-    toast('Resolution lowered to 96 so the characters are large enough to read');
-  }
   if (!silent) {
     updateControls(k);
     if (k === 'palHue' || k === 'palSat' || k === 'palLight') renderSwatches();
@@ -306,15 +299,7 @@ function surprise() {
   P.rate = Math.round(r(6, 16));
   if (chance(0.3)) P.hue = Math.round(r(-60, 60));
   if (chance(0.35)) { P.glow = r(0.3, 0.9); P.glowSize = r(0.7, 1.8); }
-  if (chance(0.14)) {
-    P.chars = pick(['letters', 'letters', 'ascii', 'blocks', 'braille', 'lines', 'binary']);
-    P.grid = pick([64, 76, 88, 100]);
-    if (chance(0.6)) P.algo = 'none';
-    P.shimmer = 0;
-    P.charShuffle = r(0.2, 0.9);
-    if (chance(0.5)) P.charFlicker = r(0.1, 0.5);
-    P.hotBlock = chance(0.6);
-  } else if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows', 'round']); P.grid = Math.min(P.grid, 160); }
+  if (chance(0.25)) { P.shape = pick(['gap', 'dot', 'diamond', 'rows', 'round']); P.grid = Math.min(P.grid, 160); }
   else if (chance(0.15)) {
     P.grid = pick([56, 64, 72, 88]);
     P.gap = r(0.06, 0.2);
@@ -660,7 +645,7 @@ function buildPanel() {
     if (tab.id === 'paint') buildPaintTab(node);
     if (tab.id === 'motion') buildKeysGroup(node);
     if (tab.id === 'shape') {
-      shapeNote = el('p.note.warn', { hidden: true, text: 'The pixels are too small on screen to show a shape or a character. Lower the resolution below.' });
+      shapeNote = el('p.note.warn', { hidden: true, text: 'The pixels are too small on screen to show a shape. Lower the resolution below.' });
       node.append(shapeNote);
     }
     let group = null, name = '';
@@ -912,13 +897,12 @@ function renderThumbs() {
   for (const { look, cv } of lookCards) {
     const lp = Object.assign({}, base, keep, look.p, { aspect: '1:1', pad: 0, intro: 'none', burst: 'none' });
     if (lp.shape === 'custom' && !hasCustomShape()) lp.shape = 'square';
-    const typed = charsOn(lp);
     const shaped = isShaped(lp);
     const fine = shaped && (lp.shapeMix !== 'none' || !['gap', 'dot', 'diamond', 'rows', 'cols', 'round'].includes(lp.shape));
-    lp.grid = typed ? 36 : fine ? 28 : shaped ? 56 : 96;
+    lp.grid = fine ? 28 : shaped ? 56 : 96;
     lp.pal = look.p.pal || base.pal;
     thumbEngine.render(lp, drawable, src.w, src.h, t, L);
-    thumbEngine.compose(cv, typed ? 7 : fine ? 8 : shaped ? 4 : 2, lp);
+    thumbEngine.compose(cv, fine ? 8 : shaped ? 4 : 2, lp);
   }
 }
 const thumbsSoon = debounce(renderThumbs, 250);
@@ -1507,14 +1491,6 @@ function buildExportTab(node) {
       mk('Sprite sheet', 'sheet', 'Every frame of the loop laid out in one PNG, for games and web animation.'),
       mk('SVG', 'svg', 'The frame you see now as vector shapes that stay sharp at any size, for print or a plotter. Glow, scanlines and colour fringe are left out.'))));
 
-  node.append(el('section.group', null, el('h3', { text: 'As text' }),
-    el('p.note', { text: 'The frame you see now, written in real characters you can paste anywhere. With characters off, the pixels are packed into braille.' }),
-    el('div.stack', null,
-      mk('Copy as text', 'copytext', 'Copy the picture as plain text. Paste it into a chat, a README or a code comment and view it in a fixed-width font.'),
-      mk('Text file', 'txt', 'Save the picture as a plain .txt file.'),
-      mk('Terminal colours', 'ansi', 'A text file with ANSI colour codes. Print it in a terminal with cat or type to see it in colour. Keep the resolution near your terminal width.'),
-      mk('Web page', 'html', 'A small HTML page with the picture as coloured, selectable text.'))));
-
   const batchBtn = el('button.btn.wide', { type: 'button', text: 'Choose files', 'data-hint': 'Pick several images, GIFs or videos. Each one gets the current look and they are saved together.',
     onclick: async () => { const files = await pickFiles(ACCEPT, true); if (files.length) runBatch(files, batchKind); } });
   exButtons.push(batchBtn);
@@ -1571,10 +1547,6 @@ async function exportOne(kind, progress, signal) {
     r = await exportSVG(app);
     return { ...r, tag: '', text: `Saved SVG · ${r.w} × ${r.h}` };
   }
-  if (kind === 'txt' || kind === 'copytext' || kind === 'ansi' || kind === 'html') {
-    r = await exportText(app, kind === 'copytext' ? 'txt' : kind);
-    return { ...r, tag: '', text: `Saved ${kind === 'ansi' ? 'terminal text' : kind === 'html' ? 'web page' : 'text'} · ${r.cols} × ${r.rows} characters` };
-  }
   throw new Error('Unknown format.');
 }
 
@@ -1627,9 +1599,6 @@ async function runExport(kind) {
     else if (kind === 'copy') {
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': res.blob })]);
       toast('Copied to the clipboard');
-    } else if (kind === 'copytext') {
-      await navigator.clipboard.writeText(res.string);
-      toast(`Copied as text · ${res.cols} × ${res.rows} characters`);
     } else {
       downloadBlob(res.blob, `nightgrain-${stamp()}${res.tag}.${res.ext}`);
       toast(`${res.text} · ${sizeText(res.blob.size)}`, 4600);
@@ -1855,7 +1824,7 @@ function draw() {
   } else {
     engine.compose(view, k, Pe, { transparent: P.transparent });
   }
-  if (shapeNote) shapeNote.hidden = !(charsOn(Pe) ? k < 5 : k < 3 && isShaped(Pe));
+  if (shapeNote) shapeNote.hidden = !(k < 3 && isShaped(Pe));
   view.classList.toggle('checker', P.transparent && !compare);
   view.style.imageRendering = view.width / dpr > aw / dpr + 1 || view.height / dpr > ah / dpr + 1 ? 'auto' : 'pixelated';
   const cw = view.width / dpr, ch = view.height / dpr;
@@ -2129,10 +2098,6 @@ function start() {
   bindStage();
   bindChrome();
   setPlaying(true);
-  // Characters are drawn with the embedded font; redraw them once it has arrived.
-  if (document.fonts && document.fonts.load) {
-    document.fonts.load('500 16px "Geist Mono"').then(() => { forgetInk(); engine.tiles.clear(); thumbEngine.tiles.clear(); dirty = true; thumbsSoon(); }).catch(() => {});
-  }
   openSource(sampleSource('moon'));
   showTab(saved && saved.tab && tabEls[saved.tab] ? saved.tab : 'looks');
   commit();

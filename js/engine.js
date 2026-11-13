@@ -2,7 +2,6 @@
 
 import { clamp, smooth, hash, hexToRgb, adjustHex, hslToHex, hexOf } from './util.js';
 import { dither } from './dither.js';
-import { charsOn, charCells, glyphTile, blockTile, brailleTile, hotTile, HOT } from './chars.js';
 
 const TAU = Math.PI * 2;
 
@@ -599,30 +598,6 @@ export class Engine {
       for (let i = 0, j = 3; i < n; i++, j += 4) if (d[j] < 96 && !(lit && lit[i])) { idx[i] = 0; lv[i] = 0; }
     }
 
-    // ---- characters: every cell with some light in it holds one, not only the dithered ones ----
-    if (charsOn(P)) {
-      const floor = Math.max(1, Math.round(P.charMin * 255));
-      const f = pal.f, pn = pal.n;
-      const ramp = P.mode === 'ramp';
-      for (let i = 0; i < n; i++) {
-        const l = lv[i];
-        if (l < floor) { idx[i] = 0; continue; }
-        if (idx[i]) continue;
-        if (ramp || pn <= 2) { idx[i] = pn <= 2 ? 1 : 1 + Math.min(pn - 2, ((l / 256) * (pn - 1)) | 0); continue; }
-        // The ink nearest to the cell's own colour at full strength.
-        let r = R[i], g = G[i], b = B[i];
-        const m = Math.max(r, g, b, 1e-4);
-        r = r / m; g = g / m; b = b / m;
-        let best = 1, bd = 1e9;
-        for (let c = 1; c < pn; c++) {
-          const dr = f[c * 3] - r, dg = f[c * 3 + 1] - g, db = f[c * 3 + 2] - b;
-          const dd = dr * dr + dg * dg + db * db;
-          if (dd < bd) { bd = dd; best = c; }
-        }
-        idx[i] = best;
-      }
-    }
-
     if (P.sparkle > 0) {
       const top = pal.brightest;
       const p = P.sparkle * 0.12;
@@ -1082,58 +1057,6 @@ export class Engine {
     lx.putImageData(this.cimg, pad * k, pad * k);
   }
 
-  /** Draw every lit cell as a character whose weight and strength follow its brightness. */
-  paintChars(lx, k, pad, P) {
-    const { w, h, idx } = this;
-    const plan = charCells(this, P);
-    const cg = this.cg, ca = this.ca;
-    const pal = this.palette(P);
-    const n = pal.n;
-    const rgb = new Uint32Array(n);
-    for (let i = 1; i < n; i++) rgb[i] = (pal.u8[i * 3 + 2] << 16) | (pal.u8[i * 3 + 1] << 8) | pal.u8[i * 3];
-    const font = ':' + k + (P.charBold ? 'b' : 'r') + P.charSize.toFixed(2);
-    const mode = plan.mode;
-    const local = new Map();
-    const tileOf = (g) => {
-      let t = local.get(g);
-      if (t) return t;
-      const key = g === HOT ? 'hot:' + k : mode === 'braille' ? 'br:' + g + ':' + k : mode === 'blocks' ? 'bl:' + g + ':' + k : 'g:' + plan.list[g] + font;
-      t = this.tiles.get(key);
-      if (!t) {
-        t = g === HOT ? hotTile(k) : mode === 'braille' ? brailleTile(g, k) : mode === 'blocks' ? blockTile(g, k) : glyphTile(plan.list[g], k, P);
-        if (this.tiles.size > 900) this.tiles.clear();
-        this.tiles.set(key, t);
-      }
-      local.set(g, t);
-      return t;
-    };
-    const W = w * k, H = h * k;
-    if (!this.cimg || this.cimg.width !== W || this.cimg.height !== H) {
-      this.cimg = new ImageData(W, H);
-      this.c32 = new Uint32Array(this.cimg.data.buffer);
-    }
-    const o = this.c32;
-    o.fill(0);
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        const v = idx[i];
-        const al = ca[i];
-        if (!v || !al) continue;
-        const T = tileOf(cg[i]);
-        const col = rgb[v];
-        let row = y * k * W + x * k;
-        for (let ty = 0, q = 0; ty < k; ty++, row += W) {
-          for (let tx = 0; tx < k; tx++, q++) {
-            const a = T[q];
-            if (a) o[row + tx] = (((a * al + 128) >> 8) << 24) | col;
-          }
-        }
-      }
-    }
-    lx.putImageData(this.cimg, pad * k, pad * k);
-  }
-
   /**
    * Light that spills from the brightest cells: a soft bloom in three sizes and thin
    * sideways streaks. Worked out in plain numbers at one value per cell (or coarser for
@@ -1267,11 +1190,9 @@ export class Engine {
     lx.globalAlpha = 1;
     lx.clearRect(0, 0, W, H);
     lx.imageSmoothingEnabled = false;
-    const typed = k >= 5 && charsOn(P);
-    const shaped = !typed && k >= 3 && isShaped(P);
+    const shaped = k >= 3 && isShaped(P);
     const ownColours = !P.customTint && customShape && (P.shapeMix === 'none' ? P.shape === 'custom' : shapeSet(P).includes('custom'));
-    if (typed) this.paintChars(lx, k, pad, P);
-    else if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0 || ownColours)) this.paintCells(lx, k, pad, P);
+    if (shaped && (P.shapeMix !== 'none' || P.shapeVar > 0 || ownColours)) this.paintCells(lx, k, pad, P);
     else {
       lx.drawImage(this.pix, pad * k, pad * k, this.w * k, this.h * k);
       if (shaped) {

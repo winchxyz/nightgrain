@@ -1,7 +1,6 @@
 // More ways to save: animated PNG, SVG, sprite sheet, Telegram sticker, and a ZIP for batches.
 
 import { Engine, paintShape, isShaped, livePalette } from './engine.js';
-import { charsOn, charCells, glyphText, asText, asANSI, asHTML } from './chars.js';
 import { exportScale } from './export.js';
 import { sleep } from './util.js';
 import { encodeSticker, STICKER_LIMIT } from './sticker.js';
@@ -336,31 +335,7 @@ export async function exportSVG(app) {
   const head = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${Math.round(W * sc)}" height="${Math.round(H * sc)}">`;
   const parts = [head, '<title>Made with Nightgrain</title>'];
   if (!P.transparent) parts.push(`<rect width="${W}" height="${H}" fill="${cols[0]}"/>`);
-  if (charsOn(Pe)) {
-    // Characters stay characters: real text, one element per colour and strength.
-    const plan = charCells(engine, Pe);
-    const mono = !['blocks', 'braille'].includes(Pe.chars);
-    const fs = mono ? 0.8 * Pe.charSize : 1;
-    const runs = new Map();
-    const xml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = y * w + x;
-        if (!idx[i] || !engine.ca[i]) continue;
-        const ch = glyphText(plan, engine.cg[i]);
-        if (ch === ' ') continue;
-        const key = idx[i] + '|' + Math.round((engine.ca[i] / 255) * 10);
-        const at = `<text x="${x + pad + 0.5}" y="${(y + pad + 0.5 + fs * 0.36).toFixed(2)}">${xml(ch)}</text>`;
-        runs.set(key, (runs.get(key) || '') + at);
-      }
-    }
-    parts.push(`<g text-anchor="middle" font-size="${fs.toFixed(3)}" font-weight="${Pe.charBold ? 700 : 500}" font-family="'SF Mono', ui-monospace, 'Geist Mono', Menlo, Consolas, monospace">`);
-    for (const [key, body] of runs) {
-      const [v, a] = key.split('|').map(Number);
-      parts.push(`<g fill="${cols[v]}"${a < 10 ? ` fill-opacity="${(a / 10).toFixed(1)}"` : ''}>${body}</g>`);
-    }
-    parts.push('</g>');
-  } else if (!isShaped(Pe)) {
+  if (!isShaped(Pe)) {
     // Plain squares: one path per colour, with runs of pixels joined into bars.
     const d = cols.map(() => '');
     for (let y = 0; y < h; y++) {
@@ -402,14 +377,4 @@ export async function exportSVG(app) {
   }
   parts.push('</svg>');
   return { blob: new Blob([parts.join('\n')], { type: 'image/svg+xml' }), w: Math.round(W * sc), h: Math.round(H * sc), ext: 'svg' };
-}
-
-/** The frame you see as text: plain (.txt), with terminal colours (.ans) or as a web page (.html). */
-export async function exportText(app, kind) {
-  const engine = app.engine;
-  await app.renderAt(app.time());
-  const Pe = app.live();
-  const r = kind === 'ansi' ? asANSI(engine, Pe) : kind === 'html' ? asHTML(engine, Pe) : asText(engine, Pe);
-  const type = kind === 'html' ? 'text/html' : 'text/plain';
-  return { blob: new Blob([r.text], { type: type + ';charset=utf-8' }), string: r.text, cols: r.cols, rows: r.rows, ext: kind === 'ansi' ? 'ans' : kind };
 }
