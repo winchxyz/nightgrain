@@ -8,7 +8,7 @@ Turn any image, GIF or video into shimmering dithered pixel art: a handful of br
 
 ![One loop saved as a GIF](docs/demo.gif)
 
-Everything runs in your browser. Your files are never uploaded.
+Everything runs in your browser. Your files are never uploaded. Every picture carries a small, barely visible `@winchxyz` mark in the bottom right corner.
 
 ## What it does
 

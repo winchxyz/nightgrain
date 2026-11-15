@@ -26,6 +26,8 @@ const engine = new Engine();
 // The pointer's trace on the picture: light, ripples, smears.
 const touchFx = new Touch();
 engine.touch = touchFx;
+// Every picture made here carries the maker's tag; the small previews do not.
+engine.tag = true;
 let lastTouch = 'water';
 const thumbEngine = new Engine();
 const painter = new Painter();

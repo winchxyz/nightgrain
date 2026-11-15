@@ -2,7 +2,8 @@
 
 import { Engine, paintShape, isShaped, livePalette } from './engine.js';
 import { exportScale } from './export.js';
-import { sleep } from './util.js';
+import { sleep, hexOf } from './util.js';
+import { paintTag, tagSVG } from './tag.js';
 import { encodeSticker, STICKER_LIMIT } from './sticker.js';
 
 const toBlob = (canvas, type, q) => new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('Could not encode the image.'))), type, q));
@@ -178,11 +179,13 @@ export async function exportSheet(app, onProgress, signal) {
   for (let f = 0; f < frames; f++) {
     if (signal.cancelled) return null;
     await app.renderAt((f / frames) * L);
-    engine.compose(cell, k, app.live(), { transparent: P.transparent });
+    engine.compose(cell, k, app.live(), { transparent: P.transparent, tag: false });
     sx.drawImage(cell, (f % cols) * size.W, Math.floor(f / cols) * size.H);
     onProgress((f + 1) / frames, `Frame ${f + 1} of ${frames}`);
     if (f % 4 === 3) await sleep(0);
   }
+  // One tag for the whole sheet, not one in every frame.
+  if (engine.tag) paintTag(sx, sheet.width, sheet.height, hexOf(P.pal[0]));
   return { blob: await toBlob(sheet, 'image/png'), w: sheet.width, h: sheet.height, frames, cols, rows, cellW: size.W, cellH: size.H, ext: 'png' };
 }
 
@@ -375,6 +378,7 @@ export async function exportSVG(app) {
     parts.push('<defs>' + defs.join('') + '</defs>');
     for (let i = 1; i < cols.length; i++) if (uses[i]) parts.push(`<g fill="${cols[i]}">${uses[i]}</g>`);
   }
+  if (engine.tag) parts.push(tagSVG(W, H, cols[0]));
   parts.push('</svg>');
   return { blob: new Blob([parts.join('\n')], { type: 'image/svg+xml' }), w: Math.round(W * sc), h: Math.round(H * sc), ext: 'svg' };
 }

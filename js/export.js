@@ -3,6 +3,7 @@
 import { GifWriter, buildPalette, paletteMapper } from './gif.js';
 import { hexToRgb, sleep } from './util.js';
 import { isShaped, hasLight, livePalette } from './engine.js';
+import { stampTag, tagColour, tagUnder } from './tag.js';
 
 const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/+esm';
 
@@ -60,11 +61,14 @@ export async function exportGIF(app, onProgress, signal) {
   const { W, H } = engine.outSize(P, k);
   if (W * H * frames > 900e6) throw new Error('That GIF would be enormous. Pick a smaller size, a lower frame rate or a shorter loop.');
   // Exact-palette GIFs need a picture made only of palette colours that never change.
-  const pure = isPure(P, k) && app.steadyColours();
+  const live = livePalette(P);
+  const pure = isPure(P, k) && app.steadyColours() && live.length < 256;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   let writer, mapper;
-  const palBytes = new Uint8Array(livePalette(P).slice(0, 256).flatMap((c) => hexToRgb(c)));
+  // One more colour after the palette, for the tag.
+  const tagIndex = live.length;
+  const palBytes = new Uint8Array([...live.flatMap((c) => hexToRgb(c)), ...tagColour(live[0], tagUnder(engine, P, k))]);
 
   if (pure) {
     writer = new GifWriter(W, H, palBytes);
@@ -93,7 +97,9 @@ export async function exportGIF(app, onProgress, signal) {
     const delay = Math.max(2, Math.round(want));
     carry = want - delay;
     if (pure) {
-      writer.addFrame(indexFrame(engine, P, k), delay, { transparent: P.transparent ? 0 : -1 });
+      const frame = indexFrame(engine, P, k);
+      if (engine.tag) stampTag(frame, W, H, tagIndex);
+      writer.addFrame(frame, delay, { transparent: P.transparent ? 0 : -1 });
     } else {
       engine.compose(canvas, k, app.live());
       writer.addFrame(mapper(ctx.getImageData(0, 0, W, H).data), delay);

@@ -2,6 +2,7 @@
 
 import { clamp, smooth, hash, hexToRgb, adjustHex, hslToHex, hexOf } from './util.js';
 import { dither } from './dither.js';
+import { paintTag, tagUnder } from './tag.js';
 
 const TAU = Math.PI * 2;
 
@@ -1289,6 +1290,7 @@ export class Engine {
     }
     if (P.bloom > 0 || P.streak > 0) this.highlights(ctx, k, pad, P);
     if (P.ring > 0) this.lensRing(ctx, W, H, P);
+    if (this.tag && opts.tag !== false) paintTag(ctx, W, H, hexOf(P.pal[0]), tagUnder(this, P, k));
     return { W, H, pad };
   }
 }
